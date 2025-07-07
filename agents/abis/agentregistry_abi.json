@@ -1,0 +1,171 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "agentAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getAgentLearningState",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "reputation",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "confidenceFactor",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "riskTolerance",
+            "type": "uint256"
+          },
+          {
+            "components": [
+              {
+                "internalType": "string",
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "internalType": "uint256",
+                "name": "weight",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct AgentRegistry.Capability[]",
+            "name": "capabilities",
+            "type": "tuple[]"
+          }
+        ],
+        "internalType": "struct AgentRegistry.AgentLearningState",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "agentAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getAgentBiddingStrategy",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "confidenceFactor",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "riskTolerance",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgentRegistry.BiddingStrategy",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "agentAddress",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "confidenceFactor",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "riskTolerance",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgentRegistry.BiddingStrategy",
+        "name": "strategy",
+        "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "weight",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgentRegistry.Capability[]",
+        "name": "capabilities",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "updateAgentLearningState",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "agentAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getAgentReputation",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "agentAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getAgentWorkload",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] 
