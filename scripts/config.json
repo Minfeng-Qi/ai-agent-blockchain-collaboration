@@ -1,0 +1,38 @@
+{
+  "ganache": {
+    "host": "0.0.0.0",
+    "port": 8545,
+    "accounts": 10,
+    "defaultBalanceEther": 1000,
+    "networkId": 1337,
+    "chainId": 1337,
+    "mnemonic": "myth like bonus scare over problem client lizard pioneer submit female collect"
+  },
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 8001
+  },
+  "frontend": {
+    "port": 3000,
+    "autoStart": false
+  },
+  "deployment": {
+    "autoInitData": true,
+    "autoRestartBackend": true,
+    "deployTimeout": 120,
+    "contracts": [
+      "AgentRegistry",
+      "ActionLogger", 
+      "IncentiveEngine",
+      "TaskManager",
+      "BidAuction",
+      "MessageHub",
+      "Learning"
+    ]
+  },
+  "monitoring": {
+    "checkInterval": 10,
+    "retryDelay": 30,
+    "enabled": true
+  }
+}

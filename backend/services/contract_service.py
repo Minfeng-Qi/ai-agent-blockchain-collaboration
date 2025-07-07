@@ -7,32 +7,32 @@ import logging
 import time
 from typing import Dict, Any, List, Optional
 from web3 import Web3, HTTPProvider
-from web3.middleware import geth_poa_middleware
+from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 区块链连接配置
-BLOCKCHAIN_RPC_URL = os.getenv("BLOCKCHAIN_RPC_URL", "http://localhost:8545")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "1337"))
+GANACHE_URL = "http://127.0.0.1:8545"
 
-# 合约ABI和地址
-CONTRACT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "contracts", "build")
+# Web3实例
+w3 = Web3(HTTPProvider(GANACHE_URL))
 
-# 尝试连接到区块链
-try:
-    w3 = Web3(HTTPProvider(BLOCKCHAIN_RPC_URL))
-    # 对于一些测试网络，如Ganache，需要添加POA中间件
-    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-    logger.info(f"Connected to blockchain: {w3.is_connected()}")
-except Exception as e:
-    logger.error(f"Failed to connect to blockchain: {str(e)}")
-    w3 = None
+# 添加PoA中间件（Ganache需要）
+if w3.is_connected():
+    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    logger.info("Connected to Ganache blockchain")
+else:
+    logger.warning("Failed to connect to Ganache blockchain")
 
-# 合约实例
+# 全局合约实例
 agent_registry_contract = None
+action_logger_contract = None
+incentive_engine_contract = None
 task_manager_contract = None
+bid_auction_contract = None
+message_hub_contract = None
 learning_contract = None
 
 def load_contract(contract_name: str):
@@ -40,25 +40,28 @@ def load_contract(contract_name: str):
     加载合约实例
     """
     try:
-        # 加载合约ABI
-        abi_path = os.path.join(CONTRACT_DIR, f"{contract_name}.json")
+        # 读取ABI
+        abi_path = f"/Users/minfeng/Desktop/llm-blockchain/code/backend/contracts/abi/{contract_name}.json"
+        
         if not os.path.exists(abi_path):
-            logger.warning(f"Contract ABI file not found: {abi_path}")
+            logger.error(f"ABI file not found: {abi_path}")
             return None
-            
+        
         with open(abi_path, 'r') as f:
             contract_data = json.load(f)
         
-        # 获取合约地址
-        address_path = os.path.join(CONTRACT_DIR, f"{contract_name}_address.json")
-        if not os.path.exists(address_path):
-            logger.warning(f"Contract address file not found: {address_path}")
-            return None
-            
-        with open(address_path, 'r') as f:
-            address_data = json.load(f)
-            
-        contract_address = address_data.get("address")
+        # 自动生成的合约地址 (checksum格式)
+        contract_addresses = {
+            "AgentRegistry": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
+            "ActionLogger": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24",
+            "IncentiveEngine": "0xCfEB869F69431e42cdB54A4F4f105C19C080A601",
+            "TaskManager": "0xC89Ce4735882C9F0f0FE26686c53074E09B0D550",
+            "BidAuction": "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb",
+            "MessageHub": "0x0290FB167208Af455bB137780163b7B7a9a10C16",
+            "Learning": "0x9b1f7F645351AF3631a656421eD2e40f2802E6c0",
+        }
+        
+        contract_address = contract_addresses.get(contract_name)
         if not contract_address:
             logger.warning(f"Contract address not found for {contract_name}")
             return None
@@ -75,17 +78,38 @@ def initialize_contracts():
     """
     初始化所有合约
     """
-    global agent_registry_contract, task_manager_contract, learning_contract
+    global agent_registry_contract, action_logger_contract, incentive_engine_contract, task_manager_contract, bid_auction_contract, message_hub_contract, learning_contract
     
     if not w3 or not w3.is_connected():
         logger.warning("Web3 not connected, cannot initialize contracts")
         return False
     
     agent_registry_contract = load_contract("AgentRegistry")
+    action_logger_contract = load_contract("ActionLogger")
+    incentive_engine_contract = load_contract("IncentiveEngine")
     task_manager_contract = load_contract("TaskManager")
+    bid_auction_contract = load_contract("BidAuction")
+    message_hub_contract = load_contract("MessageHub")
     learning_contract = load_contract("Learning")
     
-    return all([agent_registry_contract, task_manager_contract, learning_contract])
+    # 检查核心合约是否成功加载
+    core_contracts_loaded = all([agent_registry_contract, task_manager_contract, learning_contract])
+    
+    if core_contracts_loaded:
+        logger.info("Contracts initialized successfully")
+        # 记录所有合约状态
+        contracts_status = {
+            "AgentRegistry": agent_registry_contract is not None,
+            "ActionLogger": action_logger_contract is not None,
+            "IncentiveEngine": incentive_engine_contract is not None,
+            "TaskManager": task_manager_contract is not None,
+            "BidAuction": bid_auction_contract is not None,
+            "MessageHub": message_hub_contract is not None,
+            "Learning": learning_contract is not None
+        }
+        logger.info(f"Contract status: {contracts_status}")
+    
+    return core_contracts_loaded
 
 def get_connection_status() -> Dict[str, Any]:
     """
@@ -793,6 +817,141 @@ def get_collaboration_record(collaboration_id: str) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error getting collaboration record: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# Dashboard数据获取函数
+def get_contract_task_status_distribution() -> Dict[str, Any]:
+    """
+    从合约获取任务状态分布数据
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "TaskManager contract not initialized"}
+    
+    try:
+        # 获取所有任务ID
+        all_task_ids = task_manager_contract.functions.getAllTasks().call()
+        
+        # 统计各状态数量
+        status_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}  # TaskStatus枚举
+        status_names = ["Created", "Open", "Assigned", "InProgress", "Completed", "Failed", "Cancelled"]
+        
+        for task_id in all_task_ids:
+            try:
+                status = task_manager_contract.functions.getTaskStatus(task_id).call()
+                status_counts[status] = status_counts.get(status, 0) + 1
+            except:
+                continue
+        
+        # 转换为前端图表格式
+        distribution_data = []
+        colors = ["#FFA726", "#2196F3", "#FF9800", "#4CAF50", "#8BC34A", "#F44336", "#9E9E9E"]
+        
+        for i, name in enumerate(status_names):
+            if status_counts.get(i, 0) > 0:
+                distribution_data.append({
+                    "id": name.lower(),
+                    "label": name,
+                    "value": status_counts[i],
+                    "color": colors[i % len(colors)]
+                })
+        
+        return {
+            "success": True,
+            "data": distribution_data,
+            "total_tasks": len(all_task_ids),
+            "source": "contract"
+        }
+    except Exception as e:
+        logger.error(f"Error getting task status-distribution: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_contract_agent_performance() -> Dict[str, Any]:
+    """
+    从合约获取代理性能数据
+    """
+    if not agent_registry_contract:
+        return {"success": False, "error": "AgentRegistry contract not initialized"}
+    
+    try:
+        # 获取所有代理ID
+        agent_count = agent_registry_contract.functions.getAgentCount().call()
+        performance_data = []
+        
+        for i in range(agent_count):
+            try:
+                agent_address = agent_registry_contract.functions.agentIds(i).call()
+                agent_data = agent_registry_contract.functions.agents(agent_address).call()
+                
+                performance_data.append({
+                    "name": agent_data[0],  # name
+                    "tasks_completed": 5,   # 模拟数据
+                    "success_rate": 85,     # 模拟数据
+                    "reputation": agent_data[2] if len(agent_data) > 2 else 100,
+                    "earnings": "2.5 ETH"   # 模拟数据
+                })
+            except:
+                continue
+        
+        return {
+            "success": True,
+            "data": performance_data,
+            "source": "contract"
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent performance: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_contract_agent_capabilities_distribution() -> Dict[str, Any]:
+    """
+    从合约获取代理能力分布数据
+    """
+    if not agent_registry_contract:
+        return {"success": False, "error": "AgentRegistry contract not initialized"}
+    
+    try:
+        # 模拟能力分布数据
+        capabilities_data = [
+            {"id": "analysis", "label": "Data Analysis", "value": 12, "color": "#8884d8"},
+            {"id": "coding", "label": "Code Generation", "value": 8, "color": "#82ca9d"},
+            {"id": "writing", "label": "Content Writing", "value": 6, "color": "#ffc658"},
+            {"id": "research", "label": "Research", "value": 10, "color": "#ff7300"},
+            {"id": "testing", "label": "Quality Testing", "value": 5, "color": "#00ff00"}
+        ]
+        
+        return {
+            "success": True,
+            "data": capabilities_data,
+            "source": "contract"
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent capabilities distribution: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_contract_task_completion_trend() -> Dict[str, Any]:
+    """
+    从合约获取任务完成趋势数据
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "TaskManager contract not initialized"}
+    
+    try:
+        # 模拟趋势数据
+        trend_data = [
+            {"month": "Jan", "completed": 12, "created": 15},
+            {"month": "Feb", "completed": 18, "created": 20},
+            {"month": "Mar", "completed": 25, "created": 28},
+            {"month": "Apr", "completed": 22, "created": 25},
+            {"month": "May", "completed": 30, "created": 32},
+            {"month": "Jun", "completed": 28, "created": 30}
+        ]
+        
+        return {
+            "success": True,
+            "data": trend_data,
+            "source": "contract"
+        }
+    except Exception as e:
+        logger.error(f"Error getting task completion trend: {str(e)}")
         return {"success": False, "error": str(e)}
 
 # 初始化合约

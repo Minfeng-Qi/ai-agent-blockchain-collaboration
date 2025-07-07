@@ -101,6 +101,147 @@ async def get_agents(
         "source": "mock"
     }
 
+@router.get("/performance", response_model=Dict[str, Any])
+async def get_agent_performance():
+    """
+    获取代理性能数据，用于前端Dashboard展示。
+    """
+    # 首先尝试从合约获取数据
+    contract_result = contract_service.get_contract_agent_performance()
+    
+    if contract_result["success"] and contract_result["data"]:
+        return {
+            "data": contract_result["data"],
+            "total_agents": contract_result["total_agents"],
+            "source": "contract",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # 如果合约数据获取失败，使用模拟数据
+    logger.warning("Failed to get contract agent performance data, using mock data")
+    
+    import random
+    
+    # 生成性能数据
+    performance_data = []
+    for agent in mock_agents:
+        # 计算成功率
+        success_rate = min(100, agent["reputation"] + random.randint(-5, 5))
+        
+        performance_data.append({
+            "id": agent["agent_id"],
+            "name": agent["name"],
+            "reputation": agent["reputation"],
+            "tasksCompleted": agent["tasks_completed"],
+            "successRate": success_rate,
+            "averageScore": agent["average_score"],
+            "capabilities": agent["capabilities"],
+            "earnings": round(agent["tasks_completed"] * 0.1 + random.uniform(0, 2), 2),
+            "responseTime": random.randint(50, 300),  # ms
+            "uptime": random.uniform(95, 99.9)  # percentage
+        })
+    
+    return {
+        "data": performance_data,
+        "total_agents": len(performance_data),
+        "source": "mock_fallback",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@router.get("/capabilities-distribution", response_model=Dict[str, Any])
+async def get_agent_capabilities_distribution():
+    """
+    获取代理能力分布数据，用于前端图表展示。
+    """
+    # 首先尝试从合约获取数据
+    contract_result = contract_service.get_contract_agent_capabilities_distribution()
+    
+    if contract_result["success"] and contract_result["data"]:
+        return {
+            "data": contract_result["data"],
+            "total_capabilities": contract_result["total_capabilities"],
+            "unique_capabilities": contract_result["unique_capabilities"],
+            "source": "contract",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # 如果合约数据获取失败，使用模拟数据
+    logger.warning("Failed to get contract agent capabilities data, using mock data")
+    
+    # 统计各种能力的分布
+    capabilities_count = {}
+    for agent in mock_agents:
+        for capability in agent["capabilities"]:
+            capabilities_count[capability] = capabilities_count.get(capability, 0) + 1
+    
+    # 转换为图表数据格式
+    distribution_data = []
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    
+    for i, (capability, count) in enumerate(capabilities_count.items()):
+        distribution_data.append({
+            "capability": capability.replace("_", " ").title(),
+            "count": count,
+            "percentage": round((count / len(mock_agents)) * 100, 1),
+            "color": colors[i % len(colors)]
+        })
+    
+    # 如果没有数据，提供默认数据
+    if not distribution_data:
+        distribution_data = [
+            {"capability": "Data Analysis", "count": 8, "percentage": 40.0, "color": "#1f77b4"},
+            {"capability": "Text Generation", "count": 6, "percentage": 30.0, "color": "#ff7f0e"},
+            {"capability": "Image Recognition", "count": 4, "percentage": 20.0, "color": "#2ca02c"},
+            {"capability": "Code Generation", "count": 3, "percentage": 15.0, "color": "#d62728"}
+        ]
+    
+    return {
+        "data": distribution_data,
+        "total_capabilities": sum(item["count"] for item in distribution_data),
+        "unique_capabilities": len(distribution_data),
+        "source": "mock_fallback",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@router.get("/{agent_id}/capability-radar", response_model=Dict[str, Any])
+async def get_agent_capability_radar(agent_id: str):
+    """
+    获取特定代理的能力雷达图数据。
+    """
+    import random
+    
+    # 查找代理
+    target_agent = None
+    for agent in mock_agents:
+        if agent["agent_id"] == agent_id or agent["name"].lower() == agent_id.lower():
+            target_agent = agent
+            break
+    
+    if not target_agent:
+        # 使用第一个代理作为默认值
+        target_agent = mock_agents[0] if mock_agents else None
+    
+    if not target_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # 生成雷达图数据
+    radar_data = [
+        {"skill": "Technical Skills", "value": min(100, target_agent["reputation"] + random.randint(-10, 10))},
+        {"skill": "Communication", "value": min(100, target_agent["average_score"] * 20 + random.randint(-5, 15))},
+        {"skill": "Problem Solving", "value": min(100, target_agent["reputation"] - 5 + random.randint(0, 15))},
+        {"skill": "Efficiency", "value": min(100, (target_agent["tasks_completed"] / 50) * 100 + random.randint(-10, 10))},
+        {"skill": "Reliability", "value": min(100, target_agent["reputation"] + random.randint(-5, 5))},
+        {"skill": "Learning Ability", "value": min(100, len(target_agent["capabilities"]) * 25 + random.randint(0, 20))}
+    ]
+    
+    return {
+        "data": radar_data,
+        "agent_id": target_agent["agent_id"],
+        "agent_name": target_agent["name"],
+        "source": "backend",
+        "timestamp": datetime.now().isoformat()
+    }
+
 @router.get("/{agent_id}", response_model=Dict[str, Any])
 async def get_agent(agent_id: str):
     """

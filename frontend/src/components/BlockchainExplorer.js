@@ -113,61 +113,120 @@ const BlockchainExplorer = () => {
     setLoading(true);
     setError(null);
     
+    // 独立获取每个数据源，这样可以混合使用真实数据和mock数据
+    let hasErrors = false;
+    
+    // 获取交易列表 (真实数据)
     try {
-      // 获取交易列表
       const txResponse = await blockchainApi.getTransactions({ 
         limit: 100, 
         offset: 0,
         event_type: filterType !== 'all' ? filterType : undefined
       });
       setTransactions(txResponse.transactions || []);
-      
-      // 获取区块链统计数据
+    } catch (err) {
+      console.error("Error fetching transactions:", err);
+      hasErrors = true;
+      // 交易API失败时使用mock数据
+      const mockTxData = blockchainApi.generateMockTransactions();
+      setTransactions(mockTxData.transactions || []);
+    }
+    
+    // 获取区块链统计数据 (真实数据)
+    try {
       const statsResponse = await blockchainApi.getBlockchainStats();
-      setStats(statsResponse);
-      
-      // 获取区块数据
+      setStats({
+        blockchain: statsResponse
+      });
+    } catch (err) {
+      console.error("Error fetching blockchain stats:", err);
+      hasErrors = true;
+      // 统计API失败时设置断连状态
+      setStats({
+        blockchain: {
+          transaction_count: 0,
+          block_count: 0,
+          latest_block: 0,
+          avg_block_time: 0.0,
+          avg_transactions_per_block: 0.0,
+          agent_count: 0,
+          task_count: 0,
+          learning_event_count: 0,
+          connected: false
+        }
+      });
+    }
+    
+    // 获取区块数据 (需要根据连接状态智能处理)
+    try {
       const blocksResponse = await blockchainApi.getBlocks({
         limit: 10,
         offset: 0
       });
-      setBlocks(blocksResponse.blocks || []);
       
-      // 获取事件数据
+      // 检查是否返回了mock数据的标志
+      if (blocksResponse.note && blocksResponse.note.includes("Using mock data")) {
+        // 后端返回mock数据，我们需要根据区块链连接状态决定显示什么
+        // 先获取当前连接状态
+        const currentStats = await blockchainApi.getBlockchainStats();
+        if (currentStats.connected) {
+          // 如果已连接但后端API不可用，显示空数据（真实的空状态）
+          setBlocks([]);
+        } else {
+          // 如果未连接，使用mock数据
+          const mockBlocksData = blockchainApi.generateMockBlocks();
+          setBlocks(mockBlocksData.blocks || []);
+        }
+      } else {
+        // 后端返回真实数据
+        setBlocks(blocksResponse.blocks || []);
+      }
+    } catch (err) {
+      console.error("Error fetching blocks:", err);
+      hasErrors = true;
+      // API调用失败时使用mock数据
+      const mockBlocksData = blockchainApi.generateMockBlocks();
+      setBlocks(mockBlocksData.blocks || []);
+    }
+    
+    // 获取事件数据 (需要根据连接状态智能处理)
+    try {
       const eventsResponse = await blockchainApi.getEvents({
         limit: 10,
         offset: 0
       });
-      setEvents(eventsResponse.events || []);
       
+      // 检查是否有错误标志
+      if (eventsResponse.note && eventsResponse.note.includes("Error fetching events")) {
+        // 后端API不可用，我们需要根据区块链连接状态决定显示什么
+        // 获取当前连接状态
+        const currentStats = await blockchainApi.getBlockchainStats();
+        if (currentStats.connected) {
+          // 如果已连接但后端API不可用，显示空数据（真实的空状态）
+          setEvents([]);
+        } else {
+          // 如果未连接，使用mock数据
+          const mockEventsData = blockchainApi.generateMockEvents();
+          setEvents(mockEventsData.events || []);
+        }
+      } else {
+        // 后端返回真实数据
+        setEvents(eventsResponse.events || []);
+      }
     } catch (err) {
-      console.error("Error fetching blockchain data:", err);
-      setError("Failed to load blockchain data. Using mock data instead.");
-      
-      // 使用模拟数据
-      const mockTxData = blockchainApi.generateMockTransactions();
-      setTransactions(mockTxData.transactions || []);
-      
-      // 使用模拟区块数据
-      const mockBlocksData = blockchainApi.generateMockBlocks();
-      setBlocks(mockBlocksData.blocks || []);
-      
-      // 使用模拟事件数据
+      console.error("Error fetching events:", err);
+      hasErrors = true;
+      // API调用失败时使用mock数据
       const mockEventsData = blockchainApi.generateMockEvents();
       setEvents(mockEventsData.events || []);
-      
-      // 设置模拟统计数据
-      setStats({
-        blockchain: {
-          transaction_count: mockTxData.transactions.length,
-          block_count: mockBlocksData.blocks.length,
-          latest_block: mockBlocksData.blocks[0]?.block_number || 0,
-          connected: true
-        }
-      });
-    } finally {
-      setLoading(false);
     }
+    
+    // 只有在有错误时才显示错误信息
+    if (hasErrors) {
+      setError("Some blockchain data sources are using fallback data.");
+    }
+    
+    setLoading(false);
   };
 
   // 初始加载和刷新数据
@@ -227,8 +286,33 @@ const BlockchainExplorer = () => {
 
   // 格式化时间戳
   const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
+    if (!timestamp) return 'N/A';
+    
+    // 处理Unix时间戳（后端真实数据）和ISO字符串（mock数据）
+    let date;
+    if (typeof timestamp === 'number') {
+      // Unix时间戳（秒）转换为毫秒
+      date = new Date(timestamp * 1000);
+    } else {
+      // ISO字符串格式
+      date = new Date(timestamp);
+    }
+    
     return date.toLocaleString();
+  };
+
+  // 格式化交易值
+  const formatValue = (value) => {
+    if (!value && value !== 0) return 'N/A';
+    
+    // 处理数字类型（后端真实数据）和字符串类型（mock数据）
+    if (typeof value === 'number') {
+      return `${value.toFixed(6)} ETH`;
+    } else if (typeof value === 'string' && value.includes('ETH')) {
+      return value; // 已经格式化的字符串
+    } else {
+      return `${parseFloat(value || 0).toFixed(6)} ETH`;
+    }
   };
 
   // 渲染交易表格
@@ -272,7 +356,7 @@ const BlockchainExplorer = () => {
                     <TableCell>
                       <ShortAddress address={tx.to_address} />
                     </TableCell>
-                    <TableCell>{tx.value}</TableCell>
+                    <TableCell>{formatValue(tx.value)}</TableCell>
                     <TableCell>
                       <Chip 
                         label={tx.event_type} 

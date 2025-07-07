@@ -457,6 +457,107 @@ async def delete_task(task_id: str):
     
     raise HTTPException(status_code=404, detail="Task not found")
 
+@router.get("/status-distribution", response_model=Dict[str, Any])
+async def get_task_status_distribution():
+    """
+    获取任务状态分布数据，用于前端图表展示。
+    """
+    # 首先尝试从合约获取数据
+    contract_result = contract_service.get_contract_task_status_distribution()
+    
+    if contract_result["success"] and contract_result["data"]:
+        return {
+            "data": contract_result["data"],
+            "total_tasks": contract_result["total_tasks"],
+            "source": "contract",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # 如果合约数据获取失败，使用模拟数据
+    logger.warning("Failed to get contract data, using mock data")
+    
+    # 计算状态分布
+    status_counts = {}
+    for task in mock_tasks:
+        status = task.get("status", "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    
+    # 转换为图表数据格式
+    distribution_data = []
+    for status, count in status_counts.items():
+        distribution_data.append({
+            "id": status,
+            "label": status.replace("_", " ").title(),
+            "value": count,
+            "color": {
+                "open": "#2196F3",
+                "assigned": "#FF9800",
+                "completed": "#4CAF50",
+                "cancelled": "#F44336"
+            }.get(status, "#9E9E9E")
+        })
+    
+    # 如果没有任务，提供默认数据
+    if not distribution_data:
+        distribution_data = [
+            {"id": "open", "label": "Open", "value": 5, "color": "#2196F3"},
+            {"id": "assigned", "label": "Assigned", "value": 8, "color": "#FF9800"},
+            {"id": "completed", "label": "Completed", "value": 12, "color": "#4CAF50"}
+        ]
+    
+    return {
+        "data": distribution_data,
+        "total_tasks": sum(item["value"] for item in distribution_data),
+        "source": "mock_fallback",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@router.get("/completion-trend", response_model=Dict[str, Any])
+async def get_task_completion_trend():
+    """
+    获取任务完成趋势数据，用于前端趋势图表。
+    """
+    # 首先尝试从合约获取数据
+    contract_result = contract_service.get_contract_task_completion_trend()
+    
+    if contract_result["success"] and contract_result["data"]:
+        return {
+            "data": contract_result["data"],
+            "period": contract_result["period"],
+            "source": "contract",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # 如果合约数据获取失败，使用模拟数据
+    logger.warning("Failed to get contract trend data, using mock data")
+    
+    from datetime import timedelta
+    import random
+    
+    # 生成过去30天的趋势数据
+    trend_data = []
+    base_date = datetime.now() - timedelta(days=30)
+    
+    for i in range(30):
+        current_date = base_date + timedelta(days=i)
+        # 模拟数据：工作日更多任务
+        is_weekend = current_date.weekday() >= 5
+        base_tasks = 3 if is_weekend else 8
+        
+        trend_data.append({
+            "x": current_date.strftime("%Y-%m-%d"),
+            "y": base_tasks + random.randint(-2, 4),
+            "completed": base_tasks + random.randint(-1, 3),
+            "created": base_tasks + random.randint(0, 5)
+        })
+    
+    return {
+        "data": trend_data,
+        "period": "30_days",
+        "source": "mock_fallback",
+        "timestamp": datetime.now().isoformat()
+    }
+
 @router.get("/{task_id}/history", response_model=Dict[str, Any])
 async def get_task_history(task_id: str):
     """

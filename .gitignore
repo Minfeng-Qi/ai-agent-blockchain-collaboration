@@ -78,6 +78,16 @@ typechain/
 # MongoDB
 data/
 
+# Process IDs and runtime files
+*.pid
+backend.pid
+ganache.pid
+ipfs.pid
+
+# Project specific
+.project_status
+backend/venv/
+
 # Misc
 .DS_Store
 Thumbs.db

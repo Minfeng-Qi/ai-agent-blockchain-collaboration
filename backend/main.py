@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
-from backend.routers import agents, tasks, learning, blockchain, collaboration
+from backend.routers import agents, tasks, learning, blockchain, analytics  # collaboration temporarily disabled
 from backend.services import contract_service
 
 # 配置日志
@@ -49,7 +49,8 @@ app.include_router(agents, prefix="/agents", tags=["agents"])
 app.include_router(tasks, prefix="/tasks", tags=["tasks"])
 app.include_router(learning, prefix="/learning", tags=["learning"])
 app.include_router(blockchain, prefix="/blockchain", tags=["blockchain"])
-app.include_router(collaboration, prefix="/collaboration", tags=["collaboration"])
+# app.include_router(collaboration, prefix="/collaboration", tags=["collaboration"])  # Temporarily disabled
+app.include_router(analytics, prefix="/analytics", tags=["analytics"])
 
 # 自定义OpenAPI
 def custom_openapi():
