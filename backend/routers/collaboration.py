@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 import logging
 import time
 import uuid
-from backend.services.agent_collaboration_service import agent_collaboration_service
+from services.agent_collaboration_service import agent_collaboration_service
 
 # 配置日志
 logger = logging.getLogger(__name__)

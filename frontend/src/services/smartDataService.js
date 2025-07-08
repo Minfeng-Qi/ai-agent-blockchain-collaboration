@@ -1,8 +1,18 @@
 // Smart Data Service - 智能数据服务
 // 自动检测后端状态并在真实数据和mock数据之间切换
 
-import { enhancedMockData } from './enhancedMockData';
+// import { enhancedMockData } from './enhancedMockData'; // 缺失，已注释
 import { api } from './api';
+
+// mock fallback for enhancedMockData
+const enhancedMockData = {
+  getNetworkActivityHeatmap: () => ({}),
+  getAgentCollaborationNetwork: () => ({}),
+  getQualityMetrics: () => ({}),
+  getPredictiveAnalytics: () => ({}),
+  getAgentCapabilityRadar: () => ({}),
+  getContractInteractions: () => ({}),
+};
 
 class SmartDataService {
   constructor() {

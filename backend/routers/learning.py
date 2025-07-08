@@ -5,7 +5,7 @@ import uuid
 import logging
 from pydantic import BaseModel
 
-from backend.services import contract_service
+from services import contract_service
 
 # 配置日志
 logger = logging.getLogger(__name__)

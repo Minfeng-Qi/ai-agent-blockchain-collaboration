@@ -116,14 +116,36 @@ const BlockchainExplorer = () => {
     // 独立获取每个数据源，这样可以混合使用真实数据和mock数据
     let hasErrors = false;
     
-    // 获取交易列表 (真实数据)
+    // 获取交易列表 (支持自动回退到Mock数据)
     try {
       const txResponse = await blockchainApi.getTransactions({ 
         limit: 100, 
         offset: 0,
         event_type: filterType !== 'all' ? filterType : undefined
       });
-      setTransactions(txResponse.transactions || []);
+      
+      // 检查API响应
+      if (txResponse.note && txResponse.note.includes("mock data")) {
+        console.log("Backend returned mock data due to connection issues");
+        setTransactions(txResponse.transactions || []);
+        hasErrors = true;
+      } else if (txResponse.transactions && txResponse.transactions.length > 0) {
+        // 真实的Ganache数据，需要过滤掉包含success字段的包装对象
+        console.log("Using real Ganache transaction data");
+        const cleanTransactions = txResponse.transactions.map(tx => {
+          // 如果交易数据被包装在success对象中，提取实际数据
+          if (tx.success !== undefined) {
+            const { success, ...cleanTx } = tx;
+            return cleanTx;
+          }
+          return tx;
+        });
+        setTransactions(cleanTransactions);
+      } else {
+        // 连接正常但没有交易数据，显示空状态
+        console.log("No transactions found in blockchain");
+        setTransactions([]);
+      }
     } catch (err) {
       console.error("Error fetching transactions:", err);
       hasErrors = true;
@@ -160,26 +182,23 @@ const BlockchainExplorer = () => {
     // 获取区块数据 (需要根据连接状态智能处理)
     try {
       const blocksResponse = await blockchainApi.getBlocks({
-        limit: 10,
+        limit: 100,  // 增加到100个区块
         offset: 0
       });
       
-      // 检查是否返回了mock数据的标志
-      if (blocksResponse.note && blocksResponse.note.includes("Using mock data")) {
-        // 后端返回mock数据，我们需要根据区块链连接状态决定显示什么
-        // 先获取当前连接状态
-        const currentStats = await blockchainApi.getBlockchainStats();
-        if (currentStats.connected) {
-          // 如果已连接但后端API不可用，显示空数据（真实的空状态）
-          setBlocks([]);
-        } else {
-          // 如果未连接，使用mock数据
-          const mockBlocksData = blockchainApi.generateMockBlocks();
-          setBlocks(mockBlocksData.blocks || []);
-        }
-      } else {
-        // 后端返回真实数据
+      // 检查API响应
+      if (blocksResponse.note && blocksResponse.note.includes("mock data")) {
+        console.log("Backend returned mock blocks data");
         setBlocks(blocksResponse.blocks || []);
+        hasErrors = true;
+      } else if (blocksResponse.blocks && blocksResponse.blocks.length > 0) {
+        // 真实的Ganache数据
+        console.log("Using real Ganache blocks data");
+        setBlocks(blocksResponse.blocks);
+      } else {
+        // 连接正常但没有区块数据，显示空状态
+        console.log("No blocks found in blockchain");
+        setBlocks([]);
       }
     } catch (err) {
       console.error("Error fetching blocks:", err);
@@ -196,22 +215,19 @@ const BlockchainExplorer = () => {
         offset: 0
       });
       
-      // 检查是否有错误标志
-      if (eventsResponse.note && eventsResponse.note.includes("Error fetching events")) {
-        // 后端API不可用，我们需要根据区块链连接状态决定显示什么
-        // 获取当前连接状态
-        const currentStats = await blockchainApi.getBlockchainStats();
-        if (currentStats.connected) {
-          // 如果已连接但后端API不可用，显示空数据（真实的空状态）
-          setEvents([]);
-        } else {
-          // 如果未连接，使用mock数据
-          const mockEventsData = blockchainApi.generateMockEvents();
-          setEvents(mockEventsData.events || []);
-        }
-      } else {
-        // 后端返回真实数据
+      // 检查API响应
+      if (eventsResponse.note && eventsResponse.note.includes("mock data")) {
+        console.log("Backend returned mock events data");
         setEvents(eventsResponse.events || []);
+        hasErrors = true;
+      } else if (eventsResponse.events && eventsResponse.events.length > 0) {
+        // 真实的Ganache事件数据
+        console.log("Using real Ganache events data");
+        setEvents(eventsResponse.events);
+      } else {
+        // 连接正常但没有事件数据，显示空状态
+        console.log("No events found in blockchain - this is normal if no contract events have been triggered");
+        setEvents([]);
       }
     } catch (err) {
       console.error("Error fetching events:", err);
@@ -233,9 +249,16 @@ const BlockchainExplorer = () => {
   useEffect(() => {
     fetchBlockchainData();
     
-    // 设置定期刷新
-    const interval = setInterval(fetchBlockchainData, 30000);
+    // 设置定期刷新 - 改为2分钟刷新一次
+    const interval = setInterval(fetchBlockchainData, 120000);
     return () => clearInterval(interval);
+  }, []); // 移除filterType依赖，避免频繁刷新
+  
+  // 单独处理filterType变化
+  useEffect(() => {
+    if (filterType !== 'all') {
+      fetchBlockchainData();
+    }
   }, [filterType]);
 
   // 处理标签页变化
@@ -395,6 +418,9 @@ const BlockchainExplorer = () => {
 
   // 渲染区块表格
   const renderBlocksTable = () => {
+    const displayBlocks = blocks
+      .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+      
     return (
       <>
         <TableContainer component={Paper} elevation={0} variant="outlined">
@@ -411,8 +437,8 @@ const BlockchainExplorer = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {blocks.length > 0 ? (
-                blocks.map((block) => (
+              {displayBlocks.length > 0 ? (
+                displayBlocks.map((block) => (
                   <TableRow 
                     key={block.block_number || block.number}
                     hover
@@ -442,6 +468,15 @@ const BlockchainExplorer = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          rowsPerPageOptions={[5, 10, 25]}
+          component="div"
+          count={blocks.length}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+        />
       </>
     );
   };

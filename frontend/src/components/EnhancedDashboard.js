@@ -46,9 +46,9 @@ import {
   AgentPerformanceRadar,
   EarningsChart 
 } from './charts';
-import { enhancedMockData } from '../services/enhancedMockData';
+// import { enhancedMockData } from '../services/enhancedMockData'; // 缺失，已注释
 import smartDataService from '../services/smartDataService';
-import dataStorageService from '../services/dataStorageService';
+// import dataStorageService from '../services/dataStorageService'; // 缺失，已注释
 
 const EnhancedDashboard = () => {
   // 状态管理
@@ -110,28 +110,28 @@ const EnhancedDashboard = () => {
           // 使用fallback数据
           switch(key) {
             case 'systemStatus':
-              data[key] = enhancedMockData.getSystemStatus();
+              data[key] = null; // enhancedMockData.getSystemStatus();
               break;
             case 'taskStatusDistribution':
-              data[key] = enhancedMockData.getTaskStatusDistribution();
+              data[key] = null; // enhancedMockData.getTaskStatusDistribution();
               break;
             case 'agentCapabilities':
-              data[key] = enhancedMockData.getAgentCapabilitiesDistribution();
+              data[key] = null; // enhancedMockData.getAgentCapabilitiesDistribution();
               break;
             case 'taskCompletionTrend':
-              data[key] = enhancedMockData.getTaskCompletionTrend();
+              data[key] = null; // enhancedMockData.getTaskCompletionTrend();
               break;
             case 'earningsAnalysis':
-              data[key] = enhancedMockData.getEarningsAnalysis();
+              data[key] = null; // enhancedMockData.getEarningsAnalysis();
               break;
             case 'agentCapabilityRadar':
-              data[key] = enhancedMockData.getAgentCapabilityRadar('top_agent');
+              data[key] = null; // enhancedMockData.getAgentCapabilityRadar('top_agent');
               break;
             case 'agentPerformance':
-              data[key] = enhancedMockData.getAgentPerformanceData();
+              data[key] = null; // enhancedMockData.getAgentPerformanceData();
               break;
             case 'realTimeMetrics':
-              data[key] = enhancedMockData.getRealTimeTaskExecution();
+              data[key] = null; // enhancedMockData.getRealTimeTaskExecution();
               break;
             default:
               data[key] = null;
@@ -149,21 +149,19 @@ const EnhancedDashboard = () => {
     } catch (err) {
       console.error('Error loading dashboard data:', err);
       setError('Failed to load dashboard data');
-      
       // 完全fallback到mock数据
       const fallbackData = {
-        systemStatus: enhancedMockData.getSystemStatus(),
-        taskStatusDistribution: enhancedMockData.getTaskStatusDistribution(),
-        agentCapabilities: enhancedMockData.getAgentCapabilitiesDistribution(),
-        taskCompletionTrend: enhancedMockData.getTaskCompletionTrend(),
-        earningsAnalysis: enhancedMockData.getEarningsAnalysis(),
-        agentCapabilityRadar: enhancedMockData.getAgentCapabilityRadar('top_agent'),
-        agentPerformance: enhancedMockData.getAgentPerformanceData(),
-        realTimeMetrics: enhancedMockData.getRealTimeTaskExecution(),
+        systemStatus: null, // enhancedMockData.getSystemStatus(),
+        taskStatusDistribution: null, // enhancedMockData.getTaskStatusDistribution(),
+        agentCapabilities: null, // enhancedMockData.getAgentCapabilitiesDistribution(),
+        taskCompletionTrend: null, // enhancedMockData.getTaskCompletionTrend(),
+        earningsAnalysis: null, // enhancedMockData.getEarningsAnalysis(),
+        agentCapabilityRadar: null, // enhancedMockData.getAgentCapabilityRadar('top_agent'),
+        agentPerformance: null, // enhancedMockData.getAgentPerformanceData(),
+        realTimeMetrics: null, // enhancedMockData.getRealTimeTaskExecution(),
         isBackendOnline: false,
         lastUpdate: new Date().toISOString()
       };
-      
       setDashboardData(fallbackData);
       setIsBackendOnline(false);
     } finally {

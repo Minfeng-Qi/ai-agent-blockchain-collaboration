@@ -1,10 +1,12 @@
 import axios from 'axios';
+import { serviceMonitor } from './serviceMonitor';
+import { enhancedMockData } from './enhancedMockData';
 
 // API 基础URL
 const API_BASE_URL = 'http://localhost:8001';
 
-// 是否使用模拟数据（当API不可用时）
-const USE_MOCK_DATA = false;
+// 智能Mock数据配置
+let USE_MOCK_DATA = false; // 初始状态，将由服务监控器动态控制
 
 // 创建axios实例
 const apiClient = axios.create({
@@ -667,6 +669,61 @@ const mockDataGenerator = {
   }
 };
 
+// 服务状态监控和智能回退
+serviceMonitor.addStatusListener((isAvailable, previousStatus) => {
+  USE_MOCK_DATA = !isAvailable;
+  console.log(`API service status changed: Backend ${isAvailable ? 'available' : 'unavailable'}, using ${USE_MOCK_DATA ? 'mock' : 'real'} data`);
+});
+
+// 智能API请求包装器
+class SmartAPIClient {
+  async request(requestFn, mockFallback, options = {}) {
+    const { useCache = false, cacheKey = '', forceReal = false } = options;
+    
+    // 如果强制使用真实API或者服务可用，尝试真实请求
+    if (forceReal || serviceMonitor.isBackendAvailable()) {
+      try {
+        const result = await requestFn();
+        // 在结果中标记数据源
+        if (result && typeof result === 'object') {
+          result._dataSource = 'backend';
+          result._timestamp = new Date().toISOString();
+        }
+        return result;
+      } catch (error) {
+        console.warn('Backend request failed, falling back to mock data:', error.message);
+        // 实时更新服务状态
+        serviceMonitor.updateServiceStatus(false);
+      }
+    }
+    
+    // 使用Mock数据回退
+    console.log('Using enhanced mock data fallback');
+    const mockResult = await mockFallback();
+    if (mockResult && typeof mockResult === 'object') {
+      mockResult._dataSource = 'mock';
+      mockResult._timestamp = new Date().toISOString();
+    }
+    return mockResult;
+  }
+  
+  // 批量请求处理
+  async batchRequest(requests) {
+    const results = await Promise.allSettled(requests.map(req => 
+      this.request(req.requestFn, req.mockFallback, req.options)
+    ));
+    
+    return results.map((result, index) => ({
+      success: result.status === 'fulfilled',
+      data: result.status === 'fulfilled' ? result.value : null,
+      error: result.status === 'rejected' ? result.reason : null,
+      request: requests[index]
+    }));
+  }
+}
+
+const smartAPI = new SmartAPIClient();
+
 // 统一API服务
 export const api = {
   // 代理协作相关
@@ -728,37 +785,31 @@ export const api = {
     }
   },
   // 代理相关
-  getAgents: async () => {
-    try {
-      const response = await apiClient.get('/agents');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching agents:', error);
-      if (USE_MOCK_DATA) {
-        console.log('Using mock agents data');
-        return mockDataGenerator.generateMockAgents();
-      }
-      throw error;
-    }
+  getAgents: async (options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get('/agents/');
+        return response.data;
+      },
+      async () => enhancedMockData.generateEnhancedAgents(),
+      options
+    );
   },
   
-  getAgentById: async (agentId) => {
-    try {
-      const response = await apiClient.get(`/agents/${agentId}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching agent ${agentId}:`, error);
-      if (USE_MOCK_DATA) {
-        console.log(`Using mock data for agent ${agentId}`);
-        return mockDataGenerator.generateMockAgentDetails(agentId);
-      }
-      throw error;
-    }
+  getAgentById: async (agentId, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get(`/agents/${agentId}`);
+        return response.data;
+      },
+      async () => enhancedMockData.generateAgentStatistics(agentId),
+      options
+    );
   },
   
   createAgent: async (agentData) => {
     try {
-      const response = await apiClient.post('/agents', agentData);
+      const response = await apiClient.post('/agents/', agentData);
       return response.data;
     } catch (error) {
       console.error('Error creating agent:', error);
@@ -785,20 +836,79 @@ export const api = {
       throw error;
     }
   },
-  
-  // 任务相关
-  getTasks: async (filters = {}) => {
+
+  // 新增的Agent详细信息API
+  getAgentStatistics: async (agentId, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get(`/agents/${agentId}/statistics`);
+        return response.data;
+      },
+      async () => enhancedMockData.generateAgentStatistics(agentId),
+      options
+    );
+  },
+
+  getAgentPerformanceHistory: async (agentId, period = '7d', metric = null, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const params = { period };
+        if (metric) params.metric = metric;
+        const response = await apiClient.get(`/agents/${agentId}/performance-history`, { params });
+        return response.data;
+      },
+      async () => ({
+        agent_id: agentId,
+        period,
+        data: enhancedMockData.generatePerformanceHistory(30),
+        source: 'enhanced_mock'
+      }),
+      options
+    );
+  },
+
+  getAgentTaskTypes: async (agentId, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get(`/agents/${agentId}/task-types`);
+        return response.data;
+      },
+      async () => enhancedMockData.generateTaskTypeDistribution(agentId),
+      options
+    );
+  },
+
+  getAgentTasks: async (agentId, filters = {}) => {
     try {
-      const response = await apiClient.get('/tasks', { params: filters });
+      const response = await apiClient.get(`/agents/${agentId}/tasks`, { params: filters });
       return response.data;
     } catch (error) {
-      console.error('Error fetching tasks:', error);
-      if (USE_MOCK_DATA) {
-        console.log('Using mock tasks data');
-        return mockDataGenerator.generateMockTasks();
-      }
+      console.error(`Error fetching agent tasks for ${agentId}:`, error);
       throw error;
     }
+  },
+
+  getAgentLearning: async (agentId, filters = {}, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get(`/agents/${agentId}/learning`, { params: filters });
+        return response.data;
+      },
+      async () => enhancedMockData.generateLearningEvents(agentId),
+      options
+    );
+  },
+  
+  // 任务相关
+  getTasks: async (filters = {}, options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get('/tasks/', { params: filters });
+        return response.data;
+      },
+      async () => enhancedMockData.generateEnhancedTasks(),
+      options
+    );
   },
   
   getTaskById: async (taskId) => {
@@ -979,20 +1089,110 @@ export const api = {
     }
   },
 
-  getSystemStats: async () => {
+  getSystemStats: async (options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get('/stats');
+        return response.data;
+      },
+      async () => enhancedMockData.generateSystemAnalytics(),
+      options
+    );
+  },
+
+  // 服务监控和状态管理
+  getServiceStatus: () => {
+    return {
+      backend_available: serviceMonitor.isBackendAvailable(),
+      status_info: serviceMonitor.getStatusInfo(),
+      data_source: serviceMonitor.isBackendAvailable() ? 'backend' : 'mock'
+    };
+  },
+
+  refreshServiceStatus: async () => {
+    return await serviceMonitor.refreshStatus();
+  },
+
+  // 系统分析和监控
+  getSystemAnalytics: async (options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get('/analytics/overview');
+        return response.data;
+      },
+      async () => enhancedMockData.generateSystemAnalytics(),
+      options
+    );
+  },
+
+  // 协作功能增强
+  getCollaborations: async (options = {}) => {
+    return smartAPI.request(
+      async () => {
+        const response = await apiClient.get('/collaboration/collaborations');
+        return response.data;
+      },
+      async () => enhancedMockData.generateCollaborationData(),
+      options
+    );
+  },
+
+  // 批量数据获取 - 用于Dashboard等需要多种数据的页面
+  getDashboardData: async () => {
+    const requests = [
+      {
+        requestFn: async () => {
+          const response = await apiClient.get('/agents/');
+          return response.data;
+        },
+        mockFallback: async () => enhancedMockData.generateEnhancedAgents()
+      },
+      {
+        requestFn: async () => {
+          const response = await apiClient.get('/tasks/');
+          return response.data;
+        },
+        mockFallback: async () => enhancedMockData.generateEnhancedTasks()
+      },
+      {
+        requestFn: async () => {
+          const response = await apiClient.get('/stats');
+          return response.data;
+        },
+        mockFallback: async () => enhancedMockData.generateSystemAnalytics()
+      }
+    ];
+
+    const results = await smartAPI.batchRequest(requests);
+    
+    return {
+      agents: results[0].success ? results[0].data : null,
+      tasks: results[1].success ? results[1].data : null,
+      analytics: results[2].success ? results[2].data : null,
+      success_rate: results.filter(r => r.success).length / results.length,
+      data_source: serviceMonitor.isBackendAvailable() ? 'backend' : 'mock',
+      timestamp: new Date().toISOString()
+    };
+  },
+
+  // 实时数据更新检查
+  checkForUpdates: async () => {
+    if (!serviceMonitor.isBackendAvailable()) {
+      return { has_updates: false, source: 'mock' };
+    }
+
     try {
-      const response = await apiClient.get('/stats');
+      const response = await apiClient.get('/system/updates');
       return response.data;
     } catch (error) {
-      console.error('Error fetching system stats:', error);
-      if (USE_MOCK_DATA) {
-        console.log('Using mock system stats data');
-        return mockDataGenerator.generateMockSystemStats();
-      }
-      throw error;
+      console.warn('Failed to check for updates:', error.message);
+      return { has_updates: false, source: 'backend_error' };
     }
   }
 };
+
+// 导出服务监控器供组件使用
+export { serviceMonitor };
 
 // 为了向后兼容，保留这些导出
 export const agentApi = {
@@ -1000,7 +1200,14 @@ export const agentApi = {
   getAgentById: api.getAgentById,
   createAgent: api.createAgent,
   updateAgent: api.updateAgent,
-  deleteAgent: api.deleteAgent
+  deleteAgent: api.deleteAgent,
+  
+  // 新增的详细信息API
+  getAgentStatistics: api.getAgentStatistics,
+  getAgentPerformanceHistory: api.getAgentPerformanceHistory,
+  getAgentTaskTypes: api.getAgentTaskTypes,
+  getAgentTasks: api.getAgentTasks,
+  getAgentLearning: api.getAgentLearning
 };
 
 export const taskApi = {

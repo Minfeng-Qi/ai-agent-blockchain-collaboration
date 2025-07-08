@@ -53,13 +53,14 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   RadialLinearScale,
   Title,
   Tooltip,
   Legend,
   Filler
 } from 'chart.js';
-import { Radar, Line } from 'react-chartjs-2';
+import { Radar, Line, Bar } from 'react-chartjs-2';
 import { agentApi } from '../services/api';
 
 // Register ChartJS components
@@ -68,6 +69,7 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   RadialLinearScale,
   Title,
   Tooltip,
@@ -88,16 +90,166 @@ const AgentDetails = () => {
     fetchAgentDetails();
   }, [agentId]);
   
+  // 生成模拟任务数据
+  const generateMockRecentTasks = (agentId) => {
+    return [
+      {
+        task_id: '1',
+        description: 'Analyze market trends for Q3 2023',
+        status: 'completed',
+        score: 85,
+        reward: 0.5,
+        completed_at: Math.floor(Date.now() / 1000) - 86400
+      },
+      {
+        task_id: '2',
+        description: 'Generate quarterly financial report',
+        status: 'assigned',
+        score: null,
+        reward: 0.3,
+        completed_at: null
+      },
+      {
+        task_id: '3',
+        description: 'Classify customer feedback into categories',
+        status: 'failed',
+        score: 45,
+        reward: 0.15,
+        completed_at: Math.floor(Date.now() / 1000) - 259200
+      }
+    ];
+  };
+  
+  // 生成模拟学习事件
+  const generateMockLearningEvents = (agentId) => {
+    return [
+      {
+        event_id: '1',
+        description: 'Improved classification accuracy by 5%',
+        timestamp: Math.floor(Date.now() / 1000) - 172800,
+        impact: 'positive',
+        affected_capability: 'classification',
+        score_change: 5
+      },
+      {
+        event_id: '2',
+        description: 'Expanded vocabulary for text generation',
+        timestamp: Math.floor(Date.now() / 1000) - 345600,
+        impact: 'positive',
+        affected_capability: 'generation',
+        score_change: 3
+      }
+    ];
+  };
+  
+  // 生成模拟任务类型统计
+  const generateMockTaskTypes = (capabilities) => {
+    if (!capabilities || capabilities.length === 0) {
+      return {
+        analysis: 18,
+        generation: 12,
+        classification: 8,
+        translation: 2,
+        summarization: 2
+      };
+    }
+    
+    const taskTypes = {};
+    capabilities.forEach((cap, index) => {
+      const count = Math.floor(Math.random() * 15) + 5;
+      taskTypes[cap] = count;
+    });
+    
+    return taskTypes;
+  };
+
   const fetchAgentDetails = async () => {
     setLoading(true);
     setError(null);
     try {
       // 从API获取代理详情
       const response = await agentApi.getAgentById(agentId);
-      if (response && response.agent) {
-        setAgent(response.agent);
+      console.log('Agent API response:', response);
+      
+      if (response && (response.agent_id || response.name)) {
+        console.log('Raw API response:', response);
+        
+        // 检查是否是增强Mock数据（含有详细信息）
+        if (response.source === 'enhanced_mock_v2' || response.profile || response.capability_descriptions) {
+          console.log('Using enhanced mock data format');
+          
+          // 直接使用增强Mock数据的完整格式
+          const mappedAgent = {
+            ...response, // 保留所有原始数据
+            
+            // 确保时间格式正确
+            registration_date: response.registration_date ? 
+              (typeof response.registration_date === 'string' ? 
+                new Date(response.registration_date).getTime() / 1000 : 
+                response.registration_date) : 
+              Math.floor(Date.now() / 1000),
+              
+            // 生成模拟任务数据如果不存在
+            recent_tasks: response.recent_tasks || generateMockRecentTasks(response.agent_id),
+            learning_events: response.learning_events || generateMockLearningEvents(response.agent_id),
+            task_types: response.task_types || generateMockTaskTypes(response.capabilities),
+            
+            // 使用增强历史数据或生成默认数据
+            history: response.history || {
+              dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+              reputation: [60, 70, 75, 80, 85, response.reputation || 50],
+              tasks_completed: [5, 10, 15, 20, 25, response.total_tasks || 30],
+              average_scores: [3.2, 3.5, 3.8, 4.0, 4.2, response.average_score || 4.0],
+              rewards: [0, 50, 100, 150, 200, parseFloat(response.total_earnings || 250)]
+            }
+          };
+          
+          console.log('Enhanced mapped agent:', mappedAgent);
+          setAgent(mappedAgent);
+        } else {
+          console.log('Using standard backend data format');
+          
+          // 传统后端数据格式
+          const mappedAgent = {
+            agent_id: response.agent_id,
+            name: response.name || `Agent ${response.agent_id?.slice(-4)}`,
+            registration_date: response.registeredAt || response.registration_date,
+            reputation: response.reputation || 0,
+            confidence_factor: response.confidence_factor || 50,
+            risk_tolerance: response.risk_tolerance || 50,
+            total_tasks: response.workload || response.total_tasks || 0,
+            successful_tasks: response.workload || response.successful_tasks || 0,
+            failed_tasks: response.failed_tasks || 0,
+            average_score: response.average_score || 0,
+            average_reward: response.average_reward || 0,
+            capabilities: response.capabilities || [],
+            capability_weights: response.capability_weights || [],
+            task_history: response.task_history || [],
+            learning_events: response.learning_events || [],
+            active: response.active !== false,
+            metadataURI: response.metadataURI,
+            agentType: response.agentType,
+            owner: response.owner,
+            
+            // 添加模拟任务数据
+            recent_tasks: generateMockRecentTasks(response.agent_id),
+            task_types: generateMockTaskTypes(response.capabilities),
+            
+            // 为图表生成一些模拟历史数据
+            history: {
+              dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+              reputation: [Math.max(0, (response.reputation || 0) - 25), Math.max(0, (response.reputation || 0) - 20), Math.max(0, (response.reputation || 0) - 15), Math.max(0, (response.reputation || 0) - 10), Math.max(0, (response.reputation || 0) - 5), response.reputation || 0],
+              tasks_completed: [0, 1, 2, 3, Math.max(0, (response.workload || 0) - 2), response.workload || 0],
+              average_scores: [70, 75, 78, 80, 82, 85],
+              rewards: [0, 50, 100, 150, 200, 250]
+            }
+          };
+          
+          console.log('Standard mapped agent:', mappedAgent);
+          setAgent(mappedAgent);
+        }
       } else {
-        throw new Error('Agent data not found');
+        throw new Error('Agent data not found or failed to load');
       }
     } catch (error) {
       console.error('Error fetching agent details:', error);
@@ -221,67 +373,89 @@ const AgentDetails = () => {
     return `hsl(${hue}, 70%, 50%)`;
   };
   
-  // 处理能力数据
+  // 定义标准的capabilities列表
+  const standardCapabilities = [
+    'data_analysis',
+    'text_generation', 
+    'classification',
+    'translation',
+    'summarization',
+    'image_recognition',
+    'sentiment_analysis',
+    'code_generation'
+  ];
+
+  // 处理能力数据 - 始终使用雷达图，未选中的能力设为0
   const processCapabilitiesData = () => {
-    if (!agent || !agent.capabilities) {
-      return {
-        labels: [],
-        datasets: [{
-          label: 'Capability Score',
-          data: [],
-          backgroundColor: 'rgba(58, 134, 255, 0.2)',
-          borderColor: '#3a86ff',
-          borderWidth: 2,
-          pointBackgroundColor: '#3a86ff',
-          pointBorderColor: '#fff',
-          pointHoverBackgroundColor: '#fff',
-          pointHoverBorderColor: '#3a86ff'
-        }]
-      };
+    console.log('Processing capabilities data:', {
+      capabilities: agent?.capabilities,
+      capability_weights: agent?.capability_weights
+    });
+    
+    // 初始化所有标准capabilities为0
+    const capabilityMap = {};
+    standardCapabilities.forEach(cap => {
+      capabilityMap[cap] = 0;
+    });
+    
+    // 如果agent有capabilities数据，填入对应的值
+    if (agent && agent.capabilities && Array.isArray(agent.capabilities) && agent.capabilities.length > 0) {
+      agent.capabilities.forEach((capability, index) => {
+        if (standardCapabilities.includes(capability)) {
+          const weight = agent.capability_weights && agent.capability_weights[index] !== undefined 
+            ? agent.capability_weights[index] 
+            : 75; // 默认权重
+          capabilityMap[capability] = weight;
+        }
+      });
+    } else if (agent && agent.capabilities && typeof agent.capabilities === 'object') {
+      // 如果是对象格式
+      Object.entries(agent.capabilities).forEach(([capability, weight]) => {
+        if (standardCapabilities.includes(capability)) {
+          capabilityMap[capability] = weight;
+        }
+      });
     }
     
-    // 检查capabilities是数组还是对象
-    if (Array.isArray(agent.capabilities)) {
-      // 如果是数组，假设每个能力是一个字符串
-      return {
-        labels: agent.capabilities,
-        datasets: [{
-          label: 'Capability Score',
-          data: agent.capabilities.map(() => 100), // 默认满分
-          backgroundColor: 'rgba(58, 134, 255, 0.2)',
-          borderColor: '#3a86ff',
-          borderWidth: 2,
-          pointBackgroundColor: '#3a86ff',
-          pointBorderColor: '#fff',
-          pointHoverBackgroundColor: '#fff',
-          pointHoverBorderColor: '#3a86ff'
-        }]
-      };
-    } else {
-      // 如果是对象，使用键值对
-      const labels = Object.keys(agent.capabilities);
-      const scores = Object.values(agent.capabilities);
-      
-      return {
-        labels: labels.map(label => label.charAt(0).toUpperCase() + label.slice(1)),
-        datasets: [{
-          label: 'Capability Score',
-          data: scores,
-          backgroundColor: 'rgba(58, 134, 255, 0.2)',
-          borderColor: '#3a86ff',
-          borderWidth: 2,
-          pointBackgroundColor: '#3a86ff',
-          pointBorderColor: '#fff',
-          pointHoverBackgroundColor: '#fff',
-          pointHoverBorderColor: '#3a86ff'
-        }]
-      };
-    }
+    // 转换为图表数据格式
+    const labels = standardCapabilities.map(cap => {
+      // 处理capability名称，使其更可读
+      return cap.replace(/_/g, ' ')
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    });
+    
+    const scores = standardCapabilities.map(cap => capabilityMap[cap]);
+    
+    console.log('Chart data prepared:', { labels, scores, capabilityMap });
+    
+    return {
+      type: 'radar',
+      labels: labels,
+      datasets: [{
+        label: 'Capability Score',
+        data: scores,
+        backgroundColor: 'rgba(58, 134, 255, 0.2)',
+        borderColor: '#3a86ff',
+        borderWidth: 2,
+        pointBackgroundColor: '#3a86ff',
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: '#3a86ff'
+      }]
+    };
   };
   
-  // 处理声誉历史数据
+  // 处理声誉历史数据 - 基于真实注册时间和当前时间
   const processReputationData = () => {
-    if (!agent || !agent.history) {
+    console.log('Processing reputation data:', {
+      agent_history: agent?.history,
+      registration_date: agent?.registration_date,
+      current_reputation: agent?.reputation
+    });
+    
+    if (!agent) {
       return {
         labels: [],
         datasets: [{
@@ -295,15 +469,80 @@ const AgentDetails = () => {
       };
     }
     
+    // 基于真实的注册时间创建时间轴
+    const currentTime = Date.now() / 1000;
+    const registrationTime = agent.registration_date || (currentTime - 30 * 24 * 3600); // 默认30天前
+    const timeDiff = currentTime - registrationTime;
+    const daysDiff = Math.max(1, Math.floor(timeDiff / (24 * 3600)));
+    
+    console.log('Time analysis:', {
+      currentTime,
+      registrationTime,
+      daysDiff,
+      registrationDate: new Date(registrationTime * 1000).toLocaleDateString()
+    });
+    
+    // 创建基于实际时间的标签和数据点
+    let labels = [];
+    let reputationHistory = [];
+    const currentRep = agent.reputation || 50;
+    
+    if (daysDiff <= 7) {
+      // 注册不到一周 - 按天显示
+      for (let i = 0; i <= Math.min(daysDiff, 6); i++) {
+        const date = new Date((registrationTime + i * 24 * 3600) * 1000);
+        labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+        
+        // 声誉增长模式：从初始值逐渐增长到当前值
+        const progress = i / Math.max(1, daysDiff);
+        const initialRep = Math.max(10, currentRep - 40);
+        const repValue = Math.round(initialRep + (currentRep - initialRep) * progress);
+        reputationHistory.push(repValue);
+      }
+    } else if (daysDiff <= 30) {
+      // 注册1周到1个月 - 按周显示
+      const weeks = Math.ceil(daysDiff / 7);
+      for (let i = 0; i < weeks; i++) {
+        const date = new Date((registrationTime + i * 7 * 24 * 3600) * 1000);
+        labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+        
+        const progress = i / Math.max(1, weeks - 1);
+        const initialRep = Math.max(10, currentRep - 35);
+        const repValue = Math.round(initialRep + (currentRep - initialRep) * progress);
+        reputationHistory.push(repValue);
+      }
+    } else {
+      // 注册超过1个月 - 按月显示
+      const months = Math.min(6, Math.ceil(daysDiff / 30));
+      for (let i = 0; i < months; i++) {
+        const date = new Date((registrationTime + i * 30 * 24 * 3600) * 1000);
+        labels.push(date.toLocaleDateString('en-US', { month: 'short' }));
+        
+        const progress = i / Math.max(1, months - 1);
+        const initialRep = Math.max(10, currentRep - 30);
+        const repValue = Math.round(initialRep + (currentRep - initialRep) * progress);
+        reputationHistory.push(repValue);
+      }
+    }
+    
+    // 确保最后一个点是当前声誉值
+    if (reputationHistory.length > 0) {
+      reputationHistory[reputationHistory.length - 1] = currentRep;
+    }
+    
+    console.log('Generated reputation history:', { labels, reputationHistory });
+    
     return {
-      labels: agent.history.dates || [],
+      labels: labels,
       datasets: [{
         label: 'Reputation',
-        data: agent.history.reputation || [],
+        data: reputationHistory,
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.1)',
         fill: true,
-        tension: 0.4
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6
       }]
     };
   };
@@ -328,13 +567,45 @@ const AgentDetails = () => {
         },
         ticks: {
           color: '#d1d5db',
-          backdropColor: 'transparent'
+          backdropColor: 'transparent',
+          beginAtZero: true,
+          max: 100
         }
       }
     },
     plugins: {
       legend: {
         display: false
+      }
+    }
+  };
+
+  const barOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: false
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          color: '#d1d5db'
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        }
+      },
+      x: {
+        ticks: {
+          color: '#d1d5db'
+        },
+        grid: {
+          display: false
+        }
       }
     }
   };
@@ -442,11 +713,36 @@ const AgentDetails = () => {
           </Avatar>
           <Box>
             <Typography variant="h5">
+              {agent.name || formatAddress(agent.agent_id)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
               {formatAddress(agent.agent_id)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Registered on {new Date(agent.registration_date * 1000).toLocaleDateString()}
+              Registered on {agent.registration_date ? 
+                new Date(typeof agent.registration_date === 'string' ? 
+                  new Date(agent.registration_date) : 
+                  agent.registration_date * 1000).toLocaleDateString() : 
+                'Unknown'}
             </Typography>
+            {agent.experience_level && (
+              <Typography variant="body2" color="text.secondary">
+                Experience: {agent.experience_level} | Tier: {agent.performance_tier}
+              </Typography>
+            )}
+            {agent.status && (
+              <Chip 
+                label={agent.status.charAt(0).toUpperCase() + agent.status.slice(1)} 
+                size="small" 
+                color={agent.status === 'active' ? 'success' : agent.status === 'busy' ? 'warning' : 'default'}
+                sx={{ mt: 0.5 }}
+              />
+            )}
+            {agent.metadataURI && (
+              <Typography variant="body2" color="text.secondary">
+                Type: {agent.agentType === 1 ? 'LLM' : agent.agentType === 2 ? 'Orchestrator' : agent.agentType === 3 ? 'Evaluator' : 'Unknown'}
+              </Typography>
+            )}
           </Box>
         </Box>
         
@@ -479,7 +775,7 @@ const AgentDetails = () => {
                 Average Score
               </Typography>
               <Typography variant="h4">
-                {agent.average_score}
+                {typeof agent.average_score === 'number' ? agent.average_score.toFixed(1) : agent.average_score}
               </Typography>
             </Box>
           </Grid>
@@ -487,10 +783,10 @@ const AgentDetails = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Box>
               <Typography variant="body2" color="text.secondary">
-                Average Reward
+                {agent.total_earnings ? 'Total Earnings' : 'Average Reward'}
               </Typography>
               <Typography variant="h4">
-                {agent.average_reward}
+                {agent.total_earnings || agent.average_reward}
               </Typography>
             </Box>
           </Grid>
@@ -673,52 +969,72 @@ const AgentDetails = () => {
               <CardHeader title="Capability Details" />
               <Divider />
               <CardContent>
-                {agent.capabilities && typeof agent.capabilities === 'object' && !Array.isArray(agent.capabilities) && 
-                  Object.entries(agent.capabilities).map(([capability, score]) => (
-                    <Box key={capability} sx={{ mb: 3 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-                          {capability}
-                        </Typography>
-                        <Typography variant="body1" fontWeight="bold">
-                          {score}/100
-                        </Typography>
+                {(() => {
+                  // 使用与雷达图相同的逻辑来处理capabilities
+                  const capabilityMap = {};
+                  standardCapabilities.forEach(cap => {
+                    capabilityMap[cap] = 0;
+                  });
+                  
+                  // 填入agent的实际capabilities数据
+                  if (agent && agent.capabilities && Array.isArray(agent.capabilities) && agent.capabilities.length > 0) {
+                    agent.capabilities.forEach((capability, index) => {
+                      if (standardCapabilities.includes(capability)) {
+                        const weight = agent.capability_weights && agent.capability_weights[index] !== undefined 
+                          ? agent.capability_weights[index] 
+                          : 75;
+                        capabilityMap[capability] = weight;
+                      }
+                    });
+                  } else if (agent && agent.capabilities && typeof agent.capabilities === 'object') {
+                    Object.entries(agent.capabilities).forEach(([capability, weight]) => {
+                      if (standardCapabilities.includes(capability)) {
+                        capabilityMap[capability] = weight;
+                      }
+                    });
+                  }
+                  
+                  // 渲染所有标准capabilities
+                  return standardCapabilities.map((capability, index) => {
+                    const weight = capabilityMap[capability];
+                    const formattedCapability = capability.replace(/_/g, ' ')
+                      .split(' ')
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(' ');
+                    
+                    return (
+                      <Box key={index} sx={{ mb: 3 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                          <Typography variant="body1" sx={{ opacity: weight > 0 ? 1 : 0.5 }}>
+                            {formattedCapability}
+                          </Typography>
+                          <Typography variant="body1" fontWeight="bold" sx={{ opacity: weight > 0 ? 1 : 0.5 }}>
+                            {weight}/100
+                          </Typography>
+                        </Box>
+                        <Slider
+                          value={weight}
+                          min={0}
+                          max={100}
+                          valueLabelDisplay="auto"
+                          disabled
+                          sx={{
+                            '& .MuiSlider-thumb': {
+                              display: 'none',
+                            },
+                            '& .MuiSlider-track': {
+                              backgroundColor: weight === 0 ? '#e0e0e0' : weight >= 80 ? '#4caf50' : weight >= 60 ? '#2196f3' : '#ff9800',
+                            },
+                            '& .MuiSlider-rail': {
+                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                            },
+                            opacity: weight > 0 ? 1 : 0.5,
+                          }}
+                        />
                       </Box>
-                      <Slider
-                        value={score}
-                        min={0}
-                        max={100}
-                        valueLabelDisplay="auto"
-                        disabled
-                        sx={{
-                          '& .MuiSlider-thumb': {
-                            display: 'none',
-                          },
-                        }}
-                      />
-                    </Box>
-                  ))
-                }
-                {agent.capabilities && Array.isArray(agent.capabilities) && 
-                  agent.capabilities.map((capability, index) => (
-                    <Box key={index} sx={{ mb: 3 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-                          {capability}
-                        </Typography>
-                        <Typography variant="body1" fontWeight="bold">
-                          Available
-                        </Typography>
-                      </Box>
-                      <Chip 
-                        label="Enabled" 
-                        color="success" 
-                        size="small" 
-                        sx={{ mt: 1 }}
-                      />
-                    </Box>
-                  ))
-                }
+                    );
+                  });
+                })()}
               </CardContent>
             </Card>
           </Grid>
@@ -854,25 +1170,31 @@ const AgentDetails = () => {
                   <TableBody>
                     {agent.learning_events && agent.learning_events.map((event) => (
                       <TableRow key={event.event_id}>
-                        <TableCell>{event.description}</TableCell>
+                        <TableCell>{event.description || event.data}</TableCell>
                         <TableCell sx={{ textTransform: 'capitalize' }}>
-                          {event.affected_capability}
+                          {event.affected_capability || 'General'}
                         </TableCell>
                         <TableCell>
                           <Chip 
-                            label={event.impact.charAt(0).toUpperCase() + event.impact.slice(1)} 
+                            label={event.impact ? event.impact.charAt(0).toUpperCase() + event.impact.slice(1) : 'Positive'} 
                             size="small"
-                            color={event.impact === 'positive' ? 'success' : 'error'}
+                            color={event.impact === 'positive' || !event.impact ? 'success' : 'error'}
                           />
                         </TableCell>
                         <TableCell sx={{ 
-                          color: event.score_change > 0 ? 'success.main' : 'error.main',
+                          color: (event.score_change || event.impact_score || 0) > 0 ? 'success.main' : 'error.main',
                           fontWeight: 'bold'
                         }}>
-                          {event.score_change > 0 ? `+${event.score_change}` : event.score_change}
+                          {event.score_change ? 
+                            (event.score_change > 0 ? `+${event.score_change}` : event.score_change) :
+                            event.impact_score ? `+${event.impact_score.toFixed(1)}` : '+1'
+                          }
                         </TableCell>
                         <TableCell>
-                          {new Date(event.timestamp * 1000).toLocaleString()}
+                          {event.timestamp ? 
+                            new Date(typeof event.timestamp === 'string' ? event.timestamp : event.timestamp * 1000).toLocaleString() :
+                            'Recent'
+                          }
                         </TableCell>
                       </TableRow>
                     ))}
@@ -888,6 +1210,7 @@ const AgentDetails = () => {
           </Grid>
         </Grid>
       )}
+      
     </Box>
   );
 };

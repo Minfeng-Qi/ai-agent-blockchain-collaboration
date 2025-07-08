@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
-from backend.services import contract_service
+from services import contract_service
 
 router = APIRouter()
 

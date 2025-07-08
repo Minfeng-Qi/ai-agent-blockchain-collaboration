@@ -10,8 +10,8 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
-from backend.routers import agents, tasks, learning, blockchain, analytics  # collaboration temporarily disabled
-from backend.services import contract_service
+from routers import agents, tasks, learning, blockchain, analytics  # collaboration temporarily disabled
+from services import contract_service
 
 # 配置日志
 logging.basicConfig(
@@ -100,11 +100,11 @@ async def system_stats():
     获取系统统计数据。
     """
     try:
-        # 从 backend.routers 模块导入模拟数据
-        from backend.routers.agents import mock_agents
-        from backend.routers.tasks import mock_tasks
-        from backend.routers.learning import mock_learning_events
-        from backend.routers.blockchain import mock_transactions, mock_blocks
+        # 从 routers 模块导入模拟数据
+        from routers.agents import mock_agents
+        from routers.tasks import mock_tasks
+        from routers.learning import mock_learning_events
+        from routers.blockchain import mock_transactions, mock_blocks
         
         # 获取代理统计数据
         agent_count = len(mock_agents)

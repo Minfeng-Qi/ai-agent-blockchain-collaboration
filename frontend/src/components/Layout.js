@@ -20,14 +20,13 @@ import {
   MenuItem,
   Badge
 } from '@mui/material';
+import DataSourceIndicator from './DataSourceIndicator';
 import { styled } from '@mui/material/styles';
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
   People as PeopleIcon,
   Assignment as AssignmentIcon,
-  BarChart as BarChartIcon,
-  Settings as SettingsIcon,
   ChevronLeft as ChevronLeftIcon,
   Notifications as NotificationsIcon,
   AccountCircle as AccountCircleIcon,
@@ -96,8 +95,6 @@ const menuItems = [
   { text: 'Tasks', icon: <AssignmentIcon />, path: '/tasks' },
   { text: 'Learning', icon: <PsychologyIcon />, path: '/learning' },
   { text: 'Blockchain', icon: <TimelineIcon />, path: '/blockchain' },
-  { text: 'Analytics', icon: <BarChartIcon />, path: '/analytics' },
-  { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];
 
 const Layout = ({ children }) => {
@@ -216,6 +213,10 @@ const Layout = ({ children }) => {
               (item.path !== '/' && location.pathname.startsWith(item.path))
             )?.text || 'Dashboard'}
           </Typography>
+          
+          {/* 数据源指示器 */}
+          <DataSourceIndicator showDetails={true} style={{ mr: 2 }} />
+          
           <Box sx={{ display: 'flex' }}>
             <Tooltip title="Notifications">
               <IconButton 

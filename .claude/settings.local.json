@@ -80,7 +80,10 @@
       "Bash(./scripts/start_system.sh:*)",
       "Bash(./scripts/stop_system.sh:*)",
       "Bash(scripts/auto_deploy.py:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(pip3 install:*)",
+      "Bash(backend/venv/bin/python test_agent_registration.py:*)",
+      "Bash(git restore:*)"
     ],
     "deny": []
   }

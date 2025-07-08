@@ -15,20 +15,28 @@ import {
   IconButton,
   Divider,
   Alert,
-  Snackbar
+  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions
 } from '@mui/material';
 import {
   Search as SearchIcon,
   Add as AddIcon,
   Refresh as RefreshIcon,
   Psychology as PsychologyIcon,
-  Assignment as AssignmentIcon
+  Assignment as AssignmentIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { agentApi } from '../services/api';
 
-const AgentCard = ({ agent }) => {
+const AgentCard = ({ agent, onDelete }) => {
   const navigate = useNavigate();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   
   // Generate avatar color based on agent address
   const getAvatarColor = (address) => {
@@ -53,27 +61,56 @@ const AgentCard = ({ agent }) => {
   
   // Extract capabilities from agent data
   const getCapabilities = () => {
-    if (agent.capabilities && Array.isArray(agent.capabilities)) {
-      // If capabilities is an array of strings
-      return agent.capabilities.reduce((obj, cap) => {
-        obj[cap] = 1;
-        return obj;
-      }, {});
+    if (agent.capabilities && Array.isArray(agent.capabilities) && agent.capabilities.length > 0) {
+      // If capabilities is an array of strings with weights
+      const capabilityObj = {};
+      agent.capabilities.forEach((cap, index) => {
+        const weight = agent.capability_weights && agent.capability_weights[index] ? agent.capability_weights[index] : 50;
+        capabilityObj[cap] = weight;
+      });
+      return capabilityObj;
     } else if (agent.capabilities && typeof agent.capabilities === 'object') {
       // If capabilities is already an object
       return agent.capabilities;
-    } else if (agent.capabilities && Array.isArray(agent.capabilities)) {
-      // If capabilities is an array of objects with name and score
-      return agent.capabilities.reduce((obj, cap) => {
-        obj[cap.name] = cap.score;
-        return obj;
-      }, {});
     }
+    // 如果没有能力数据，返回默认显示
     return {};
   };
   
   const capabilities = getCapabilities();
   const agentId = agent.agent_id || agent.address;
+  
+  // Debug logging
+  console.log('Agent data:', {
+    name: agent.name,
+    reputation: agent.reputation,
+    tasks: agent.tasks_completed || agent.tasksCompleted || agent.workload,
+    capabilities: agent.capabilities,
+    capability_weights: agent.capability_weights,
+    calculated_capabilities: capabilities
+  });
+  
+  const handleDeleteClick = () => {
+    setDeleteDialogOpen(true);
+  };
+  
+  const handleDeleteConfirm = async () => {
+    setDeleting(true);
+    try {
+      await agentApi.deleteAgent(agentId);
+      setDeleteDialogOpen(false);
+      onDelete && onDelete(agentId);
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      // 这里可以添加错误提示
+    } finally {
+      setDeleting(false);
+    }
+  };
+  
+  const handleDeleteCancel = () => {
+    setDeleteDialogOpen(false);
+  };
   
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -87,14 +124,38 @@ const AgentCard = ({ agent }) => {
           >
             {getInitials(agentId)}
           </Avatar>
-          <Typography variant="h6" component="div">
-            Agent {formatAddress(agentId)}
-          </Typography>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" component="div">
+              {agent.name || `Agent ${formatAddress(agentId)}`}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                size="small" 
+                label={agent.active !== false ? 'Active' : 'Inactive'}
+                color={agent.active !== false ? 'success' : 'default'}
+                variant="outlined"
+              />
+              {agent.source === 'blockchain' && (
+                <Chip 
+                  size="small" 
+                  label="On-Chain"
+                  color="primary"
+                  variant="outlined"
+                />
+              )}
+            </Box>
+          </Box>
         </Box>
         
         <Typography variant="body2" color="textSecondary" gutterBottom noWrap>
           {agentId}
         </Typography>
+        
+        {agent.metadataURI && (
+          <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
+            Type: {agent.agentType === 1 ? 'LLM' : agent.agentType === 2 ? 'Orchestrator' : agent.agentType === 3 ? 'Evaluator' : 'Unknown'}
+          </Typography>
+        )}
         
         <Divider sx={{ my: 1 }} />
         
@@ -112,7 +173,7 @@ const AgentCard = ({ agent }) => {
               Tasks
             </Typography>
             <Typography variant="body2" fontWeight="medium">
-              {agent.tasks_completed || agent.tasksCompleted || 0}
+              {agent.tasks_completed || agent.tasksCompleted || agent.workload || 0}
             </Typography>
           </Grid>
         </Grid>
@@ -122,18 +183,35 @@ const AgentCard = ({ agent }) => {
         </Typography>
         
         <Box>
-          {Object.entries(capabilities)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([capability, value]) => (
-              <Chip 
-                key={capability}
-                label={typeof value === 'number' ? `${capability}: ${value}` : capability}
-                size="small"
-                sx={{ mr: 0.5, mb: 0.5 }}
-              />
-            ))
-          }
+          {Object.keys(capabilities).length > 0 ? (
+            <>
+              {Object.entries(capabilities)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([capability, value]) => (
+                  <Chip 
+                    key={capability}
+                    label={typeof value === 'number' ? `${capability}: ${value}` : capability}
+                    size="small"
+                    sx={{ mr: 0.5, mb: 0.5 }}
+                    color={value >= 80 ? 'success' : value >= 60 ? 'primary' : 'default'}
+                  />
+                ))
+              }
+              {Object.keys(capabilities).length > 3 && (
+                <Chip 
+                  label={`+${Object.keys(capabilities).length - 3} more`}
+                  size="small"
+                  variant="outlined"
+                  sx={{ mr: 0.5, mb: 0.5 }}
+                />
+              )}
+            </>
+          ) : (
+            <Typography variant="body2" color="textSecondary" fontStyle="italic">
+              No capabilities configured
+            </Typography>
+          )}
         </Box>
       </CardContent>
       <CardActions>
@@ -152,6 +230,15 @@ const AgentCard = ({ agent }) => {
           Tasks
         </Button>
         <Box sx={{ flexGrow: 1 }} />
+        <IconButton 
+          size="small" 
+          color="error"
+          onClick={handleDeleteClick}
+          disabled={deleting}
+          title="Delete Agent"
+        >
+          <DeleteIcon />
+        </IconButton>
         <Button 
           size="small" 
           variant="contained"
@@ -160,6 +247,38 @@ const AgentCard = ({ agent }) => {
           Details
         </Button>
       </CardActions>
+      
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleDeleteCancel}
+        aria-labelledby="delete-dialog-title"
+        aria-describedby="delete-dialog-description"
+      >
+        <DialogTitle id="delete-dialog-title">
+          Delete Agent
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="delete-dialog-description">
+            Are you sure you want to delete agent "{agent.name || `Agent ${agentId?.slice(-4)}`}"? 
+            This action will deactivate the agent on the blockchain and cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCancel} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDeleteConfirm} 
+            color="error" 
+            variant="contained"
+            disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={20} /> : <DeleteIcon />}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Card>
   );
 };
@@ -171,48 +290,73 @@ const AgentList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarSeverity, setSnackbarSeverity] = useState('warning');
   
   useEffect(() => {
     fetchAgents();
   }, []);
   
-  const fetchAgents = async () => {
+  const fetchAgents = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
+      console.log('Fetching agents from API...', forceRefresh ? '(force refresh)' : '');
       const data = await agentApi.getAgents();
+      console.log('API response:', data);
+      
       if (data && data.agents) {
         setAgents(data.agents);
+        console.log(`Successfully loaded ${data.agents.length} agents from ${data.source}`);
       } else {
         // 处理意外的响应格式
         setAgents([]);
         setError('Unexpected response format from API');
+        setSnackbarSeverity('warning');
         setSnackbarOpen(true);
       }
     } catch (error) {
       console.error('Error fetching agents:', error);
-      setError('Failed to fetch agents. Using sample data instead.');
+      setError('Failed to fetch agents. Please check the API connection.');
+      setSnackbarSeverity('warning');
       setSnackbarOpen(true);
       
       // 使用示例数据作为后备
       setAgents([
         {
           agent_id: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          name: 'DataAnalysisAgent',
           reputation: 85,
           tasks_completed: 42,
-          capabilities: ['analysis', 'generation', 'classification']
+          capabilities: ['data_analysis', 'text_generation', 'classification'],
+          capability_weights: [90, 85, 75],
+          agentType: 1,
+          metadataURI: 'ipfs://QmExampleHash1',
+          active: true,
+          registeredAt: Date.now() - 86400000 * 30
         },
         {
           agent_id: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+          name: 'TextGenerationAgent',
           reputation: 75,
           tasks_completed: 28,
-          capabilities: ['generation', 'translation', 'summarization']
+          capabilities: ['text_generation', 'translation', 'summarization'],
+          capability_weights: [88, 80, 70],
+          agentType: 1,
+          metadataURI: 'ipfs://QmExampleHash2',
+          active: true,
+          registeredAt: Date.now() - 86400000 * 15
         },
         {
           agent_id: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
+          name: 'ClassificationAgent',
           reputation: 80,
           tasks_completed: 35,
-          capabilities: ['classification', 'analysis']
+          capabilities: ['classification', 'data_analysis'],
+          capability_weights: [85, 78],
+          agentType: 2,
+          metadataURI: 'ipfs://QmExampleHash3',
+          active: true,
+          registeredAt: Date.now() - 86400000 * 10
         }
       ]);
     } finally {
@@ -228,6 +372,23 @@ const AgentList = () => {
     setSnackbarOpen(false);
   };
   
+  const handleAgentDelete = (agentId) => {
+    // Remove the deleted agent from the local state
+    setAgents(prevAgents => prevAgents.filter(agent => 
+      (agent.agent_id || agent.address) !== agentId
+    ));
+    
+    // Show success message
+    setError(`Agent ${agentId.slice(-4)} has been successfully deleted`);
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
+    
+    // Optionally refresh the list to get updated data from server
+    setTimeout(() => {
+      fetchAgents(true);
+    }, 1000);
+  };
+  
   const filteredAgents = agents.filter(agent => {
     const agentId = agent.agent_id || agent.address || '';
     return agentId.toLowerCase().includes(searchTerm.toLowerCase());
@@ -241,7 +402,7 @@ const AgentList = () => {
         onClose={handleSnackbarClose}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={handleSnackbarClose} severity="warning" sx={{ width: '100%' }}>
+        <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
           {error}
         </Alert>
       </Snackbar>
@@ -261,7 +422,8 @@ const AgentList = () => {
           <Button 
             variant="outlined" 
             startIcon={<RefreshIcon />}
-            onClick={fetchAgents}
+            onClick={() => fetchAgents(true)}
+            disabled={loading}
           >
             Refresh
           </Button>
@@ -294,7 +456,7 @@ const AgentList = () => {
           <Grid container spacing={3}>
             {filteredAgents.map((agent) => (
               <Grid item key={agent.agent_id || agent.address} xs={12} sm={6} md={4} lg={3}>
-                <AgentCard agent={agent} />
+                <AgentCard agent={agent} onDelete={handleAgentDelete} />
               </Grid>
             ))}
           </Grid>
