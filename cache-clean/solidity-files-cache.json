@@ -44,8 +44,8 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/core/AgentRegistry.sol": {
-      "lastModificationDate": 1751978619436,
-      "contentHash": "119c481af1f8d81bbf836aa9df5a40ce",
+      "lastModificationDate": 1752040347175,
+      "contentHash": "6160a0caea569c7d3f908eb3d71bd08d",
       "sourceName": "core/AgentRegistry.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -85,7 +85,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/access/Ownable.sol": {
-      "lastModificationDate": 1752024744496,
+      "lastModificationDate": 1752025642144,
       "contentHash": "d3c790edc9ccf808a17c5a6cd13614fd",
       "sourceName": "@openzeppelin/contracts/access/Ownable.sol",
       "solcConfig": {
@@ -124,7 +124,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/cryptography/ECDSA.sol": {
-      "lastModificationDate": 1752024763687,
+      "lastModificationDate": 1752025657446,
       "contentHash": "81de029d56aa803972be03c5d277cb6c",
       "sourceName": "@openzeppelin/contracts/utils/cryptography/ECDSA.sol",
       "solcConfig": {
@@ -161,7 +161,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol": {
-      "lastModificationDate": 1752024744493,
+      "lastModificationDate": 1752025657378,
       "contentHash": "260f3968eefa3bbd30520cff5384cd93",
       "sourceName": "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol",
       "solcConfig": {
@@ -200,7 +200,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/Context.sol": {
-      "lastModificationDate": 1752024763684,
+      "lastModificationDate": 1752025637515,
       "contentHash": "67bfbc07588eb8683b3fd8f6f909563e",
       "sourceName": "@openzeppelin/contracts/utils/Context.sol",
       "solcConfig": {
@@ -237,7 +237,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/Strings.sol": {
-      "lastModificationDate": 1752024744514,
+      "lastModificationDate": 1752025642233,
       "contentHash": "13dbc135f563c72a11b1cf4fbb5fb284",
       "sourceName": "@openzeppelin/contracts/utils/Strings.sol",
       "solcConfig": {
@@ -278,7 +278,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/math/Math.sol": {
-      "lastModificationDate": 1752024744487,
+      "lastModificationDate": 1752025657435,
       "contentHash": "5ec781e33d3a9ac91ffdc83d94420412",
       "sourceName": "@openzeppelin/contracts/utils/math/Math.sol",
       "solcConfig": {
@@ -317,8 +317,45 @@
         "Math"
       ]
     },
+    "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/math/SafeCast.sol": {
+      "lastModificationDate": 1752025657355,
+      "contentHash": "2adca1150f58fc6f3d1f0a0f22ee7cca",
+      "sourceName": "@openzeppelin/contracts/utils/math/SafeCast.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": false,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "SafeCast"
+      ]
+    },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/math/SignedMath.sol": {
-      "lastModificationDate": 1752024744511,
+      "lastModificationDate": 1752025657393,
       "contentHash": "ae3528afb8bdb0a7dcfba5b115ee8074",
       "sourceName": "@openzeppelin/contracts/utils/math/SignedMath.sol",
       "solcConfig": {
@@ -356,45 +393,8 @@
         "SignedMath"
       ]
     },
-    "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/math/SafeCast.sol": {
-      "lastModificationDate": 1752024744510,
-      "contentHash": "2adca1150f58fc6f3d1f0a0f22ee7cca",
-      "sourceName": "@openzeppelin/contracts/utils/math/SafeCast.sol",
-      "solcConfig": {
-        "version": "0.8.20",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": false,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "SafeCast"
-      ]
-    },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/node_modules/@openzeppelin/contracts/utils/Panic.sol": {
-      "lastModificationDate": 1752024744503,
+      "lastModificationDate": 1752025637232,
       "contentHash": "2133dc13536b4a6a98131e431fac59e1",
       "sourceName": "@openzeppelin/contracts/utils/Panic.sol",
       "solcConfig": {
