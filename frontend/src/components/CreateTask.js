@@ -175,7 +175,7 @@ const CreateTask = () => {
         deadline: deadlineTimestamp
       };
       
-      await axios.post('http://localhost:8000/tasks', taskData);
+      await axios.post('http://localhost:8001/tasks', taskData);
       
       setSnackbar({
         open: true,

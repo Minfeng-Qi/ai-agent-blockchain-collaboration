@@ -9,7 +9,13 @@ import sys
 import json
 import time
 from web3 import Web3
-from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
+try:
+    from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
+except ImportError:
+    try:
+        from web3.middleware import ExtraDataToPOAMiddleware
+    except ImportError:
+        ExtraDataToPOAMiddleware = None
 
 # 配置
 GANACHE_URL = "http://127.0.0.1:8545"
@@ -30,7 +36,8 @@ def setup_web3():
     """设置Web3连接"""
     w3 = Web3(Web3.HTTPProvider(GANACHE_URL))
     if w3.is_connected():
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        if ExtraDataToPOAMiddleware:
+            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         print("✅ Connected to Ganache")
         return w3
     else:

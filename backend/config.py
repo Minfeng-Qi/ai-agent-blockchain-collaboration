@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # API settings
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8000"))
+API_PORT = int(os.getenv("API_PORT", "8001"))
 DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "t")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_in_production")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

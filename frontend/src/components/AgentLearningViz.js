@@ -19,7 +19,7 @@ function AgentLearningViz({ agentAddress }) {
         setLoading(true);
         
         // Fetch agent learning data from API
-        const response = await fetch(`http://localhost:8000/agents/${agentAddress}/learning`);
+        const response = await fetch(`http://localhost:8001/agents/${agentAddress}/learning`);
         if (!response.ok) {
           throw new Error('Failed to fetch agent learning data');
         }

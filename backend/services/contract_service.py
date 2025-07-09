@@ -7,7 +7,13 @@ import logging
 import time
 from typing import Dict, Any, List, Optional
 from web3 import Web3, HTTPProvider
-from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
+try:
+    from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
+except ImportError:
+    try:
+        from web3.middleware import ExtraDataToPOAMiddleware
+    except ImportError:
+        ExtraDataToPOAMiddleware = None
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +27,8 @@ w3 = Web3(HTTPProvider(GANACHE_URL))
 
 # 添加PoA中间件（Ganache需要）
 if w3.is_connected():
-    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    if ExtraDataToPOAMiddleware:
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     logger.info("Connected to Ganache blockchain")
 else:
     logger.warning("Failed to connect to Ganache blockchain")
@@ -52,13 +59,13 @@ def load_contract(contract_name: str):
         
         # 自动生成的合约地址 (checksum格式)
         contract_addresses = {
-            "AgentRegistry": "0x884dd07b864c7e3Ecef01BEfFEB07731a92B9d53",
-            "ActionLogger": "0x56F52B666D53a6555182F5Cc56d73c0c08b36a98",
-            "IncentiveEngine": "0x320ffb6049caE8C0A30F07773fd01E615E123fa8",
-            "TaskManager": "0x9bf9F7F340C7310f32d33B57E4AccDb44c27E4a4",
-            "BidAuction": "0xA28A1DB2D920Ad8E1Db8B72a87628f1bE0B400A1",
-            "MessageHub": "0xDE87D8becB4df477415Cbe74815BF7D2483120E9",
-            "Learning": "0x5d862DB17aAb6e906ddb1234f3e01db2D835F265",
+            "AgentRegistry": "0x3A8f03fE4e1539De6355B4C670a543450a05284D",
+            "ActionLogger": "0x4282123E125607DB3EdfB577bAc8e8B54214bf90",
+            "IncentiveEngine": "0x4506d2b5E3cEae9b711243C8F8eeE1d328A14f2c",
+            "TaskManager": "0x7AaF78567e139A0f286A175c26814Ab9Bfa9238f",
+            "BidAuction": "0xd6cFA33b9DeF7698884Eb5D528B01c1De77CAed4",
+            "MessageHub": "0x41C6d4DF7B89E83AC05B5703da13aE93cfD3d6BA",
+            "Learning": "0xC02A056b67b0117AD77cD4091ADc36417d15e186",
         }
         
         contract_address = contract_addresses.get(contract_name)
@@ -728,8 +735,19 @@ def get_blockchain_stats() -> Dict[str, Any]:
             except:
                 pass
         
+        # 计算总交易数（扫描最近50个区块）
+        total_transactions = 0
+        scan_blocks = min(50, latest_block + 1)
+        for i in range(latest_block, max(0, latest_block - scan_blocks), -1):
+            try:
+                block = w3.eth.get_block(i)
+                total_transactions += len(block.transactions)
+            except:
+                continue
+
         return {
             "success": True,
+            "transaction_count": total_transactions,
             "latest_block": latest_block,
             "avg_block_time": avg_block_time,
             "avg_transactions_per_block": avg_tx_per_block,

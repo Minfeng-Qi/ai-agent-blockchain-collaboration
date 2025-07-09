@@ -52,7 +52,7 @@ class SmartDataService {
   // 检查后端状态
   async checkBackendStatus() {
     try {
-      const response = await fetch('http://localhost:8000/health', {
+      const response = await fetch('http://localhost:8001/health', {
         method: 'GET',
         timeout: 5000,
         signal: AbortSignal.timeout(5000)
