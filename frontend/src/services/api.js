@@ -786,14 +786,14 @@ export const api = {
   },
   // 代理相关
   getAgents: async (options = {}) => {
-    return smartAPI.request(
-      async () => {
-        const response = await apiClient.get('/agents/');
-        return response.data;
-      },
-      async () => enhancedMockData.generateEnhancedAgents(),
-      options
-    );
+    // 不使用fallback，直接请求真实API
+    try {
+      const response = await apiClient.get('/agents/');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+      throw error;
+    }
   },
   
   getAgentById: async (agentId, options = {}) => {
@@ -833,6 +833,26 @@ export const api = {
       return response.data;
     } catch (error) {
       console.error(`Error deleting agent ${agentId}:`, error);
+      throw error;
+    }
+  },
+
+  activateAgent: async (agentId) => {
+    try {
+      const response = await apiClient.post(`/agents/${agentId}/activate`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error activating agent ${agentId}:`, error);
+      throw error;
+    }
+  },
+
+  deactivateAgent: async (agentId) => {
+    try {
+      const response = await apiClient.post(`/agents/${agentId}/deactivate`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deactivating agent ${agentId}:`, error);
       throw error;
     }
   },
@@ -1201,6 +1221,8 @@ export const agentApi = {
   createAgent: api.createAgent,
   updateAgent: api.updateAgent,
   deleteAgent: api.deleteAgent,
+  activateAgent: api.activateAgent,
+  deactivateAgent: api.deactivateAgent,
   
   // 新增的详细信息API
   getAgentStatistics: api.getAgentStatistics,

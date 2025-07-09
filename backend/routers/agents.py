@@ -55,19 +55,48 @@ async def get_agents(
         try:
             # 从区块链获取代理列表
             result = contract_service.get_all_agents()
-            if result["success"]:
-                agents = result["agents"]
+            if result.get("success"):
+                agents = result.get("agents", [])
+                
+                # 转换数据格式以匹配前端需要的格式，只返回活跃的代理
+                formatted_agents = []
+                for agent in agents:
+                    # 只包含活跃的代理
+                    if agent.get("active", True):
+                        # 为每个agent添加增强的数据字段（和单个agent详情API保持一致）
+                        
+                        formatted_agent = {
+                            "agent_id": agent.get("address"),
+                            "name": agent.get("name"),
+                            "reputation": agent.get("reputation", 0),
+                            "capabilities": agent.get("capabilities", []),
+                            "active": agent.get("active", True),
+                            "registered_at": agent.get("registered_at"),
+                            "owner": agent.get("owner"),
+                            "agent_type": agent.get("agent_type"),
+                            
+                            # 添加agent card需要的字段
+                            "capability_weights": agent.get("capability_weights", []),
+                            "workload": 0,  # 新agent没有任务历史
+                            "tasks_completed": 0,
+                            "source": "blockchain",
+                            
+                            # 添加其他前端期望的字段
+                            "agentType": agent.get("agent_type", 1),
+                            "registeredAt": agent.get("registered_at", 0)
+                        }
+                        formatted_agents.append(formatted_agent)
                 
                 # 应用过滤器
                 if capability:
-                    agents = [a for a in agents if capability in a.get("capabilities", [])]
+                    formatted_agents = [a for a in formatted_agents if capability in a.get("capabilities", [])]
                 
                 if min_reputation is not None:
-                    agents = [a for a in agents if a.get("reputation", 0) >= min_reputation]
+                    formatted_agents = [a for a in formatted_agents if a.get("reputation", 0) >= min_reputation]
                 
                 # 应用分页
-                total = len(agents)
-                paginated_agents = agents[offset:offset + limit]
+                total = len(formatted_agents)
+                paginated_agents = formatted_agents[offset:offset + limit]
                 
                 return {
                     "agents": paginated_agents,
@@ -681,10 +710,46 @@ async def get_agent(agent_id: str):
                     logger.error(f"Error getting learning events for agent {agent_id}: {str(e)}")
                 
                 # 构建完整的代理信息
-                agent_data = result.copy()
+                agent_data = result["agent"].copy()  # 提取agent数据
                 agent_data["task_history"] = task_history
                 agent_data["learning_events"] = learning_events
                 agent_data["source"] = "blockchain"
+                
+                # 使用agent_id字段名以匹配前端期望
+                agent_data["agent_id"] = agent_data["address"]
+                
+                # 添加前端期望的字段（使用真实数据）
+                agent_data["workload"] = len(task_history)
+                agent_data["total_tasks"] = len(task_history)
+                agent_data["successful_tasks"] = len([t for t in task_history if t.get("status") == "completed"])
+                agent_data["failed_tasks"] = len([t for t in task_history if t.get("status") == "failed"])
+                
+                # 计算真实的平均分数（基于任务历史）
+                task_scores = [t.get("score", 0) for t in task_history if t.get("score")]
+                agent_data["average_score"] = sum(task_scores) / len(task_scores) if task_scores else 0.0
+                
+                # 计算真实的平均奖励（基于任务历史）
+                task_rewards = [t.get("reward", 0) for t in task_history if t.get("reward")]
+                agent_data["average_reward"] = sum(task_rewards) / len(task_rewards) if task_rewards else 0.0
+                
+                # 获取真实的confidence_factor和risk_tolerance
+                try:
+                    bidding_result = contract_service.get_bidding_strategy(agent_id)
+                    if bidding_result["success"]:
+                        agent_data["confidence_factor"] = bidding_result["strategy"]["confidence_factor"]
+                        agent_data["risk_tolerance"] = bidding_result["strategy"]["risk_tolerance"]
+                    else:
+                        agent_data["confidence_factor"] = 80
+                        agent_data["risk_tolerance"] = 50
+                except Exception as e:
+                    logger.warning(f"Error getting bidding strategy for agent {agent_id}: {str(e)}")
+                    agent_data["confidence_factor"] = 80
+                    agent_data["risk_tolerance"] = 50
+                
+                # 保留从合约获取的capability_weights（不要覆盖）
+                agent_data["capabilities"] = agent_data.get("capabilities", [])
+                agent_data["agentType"] = agent_data.get("agent_type", 1)
+                agent_data["registeredAt"] = agent_data.get("registered_at", 0)
                 
                 return agent_data
             else:
@@ -727,7 +792,7 @@ async def create_agent(
             try:
                 registered_result = contract_service.get_all_agents()
                 if registered_result["success"]:
-                    registered_addresses = {agent["agent_id"] for agent in registered_result["agents"]}
+                    registered_addresses = {agent["address"] for agent in registered_result["agents"]}
                     logger.info(f"Already registered addresses: {registered_addresses}")
                 else:
                     registered_addresses = set()
@@ -932,4 +997,110 @@ async def delete_agent(agent_id: str):
                 raise HTTPException(status_code=404, detail="Agent not found")
     
     # 如果区块链未连接或禁用失败，返回服务不可用错误
+    raise HTTPException(status_code=503, detail="Blockchain service unavailable")
+
+@router.post("/{agent_id}/activate", response_model=Dict[str, Any])
+async def activate_agent(agent_id: str):
+    """
+    激活代理。
+    """
+    logger.info(f"Request to activate agent: {agent_id}")
+    
+    # 检查区块链连接
+    connection_status = contract_service.get_connection_status()
+    if connection_status["connected"] and connection_status["contracts"]["agent_registry"]:
+        try:
+            # 调用合约服务激活代理
+            result = contract_service.activate_agent(agent_id)
+            logger.info(f"Activate agent result: {result}")
+            
+            if result["success"]:
+                return {
+                    "success": True,
+                    "agent_id": agent_id,
+                    "transaction_hash": result["transaction_hash"],
+                    "block_number": result["block_number"],
+                    "activated_at": datetime.now().isoformat(),
+                    "source": "blockchain"
+                }
+            else:
+                logger.warning(f"Failed to activate agent on blockchain: {result.get('error')}")
+                error_str = str(result.get("error", "")).lower()
+                # 如果是"Agent not found"错误，直接返回404
+                if "not found" in error_str:
+                    raise HTTPException(status_code=404, detail="Agent not found")
+                # 如果是"Agent already active"错误，认为激活成功
+                elif "already active" in error_str:
+                    return {
+                        "success": True,
+                        "agent_id": agent_id,
+                        "transaction_hash": "already_active",
+                        "block_number": 0,
+                        "activated_at": datetime.now().isoformat(),
+                        "source": "blockchain",
+                        "note": "Agent was already active"
+                    }
+                else:
+                    # 其他错误，返回服务错误
+                    raise HTTPException(status_code=500, detail=f"Failed to activate agent: {error_str}")
+        except Exception as e:
+            logger.error(f"Error activating agent on blockchain: {str(e)}")
+            # 如果出现异常，也检查是否是agent不存在的问题
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # 如果区块链未连接或激活失败，返回服务不可用错误
+    raise HTTPException(status_code=503, detail="Blockchain service unavailable")
+
+@router.post("/{agent_id}/deactivate", response_model=Dict[str, Any])
+async def deactivate_agent(agent_id: str):
+    """
+    停用代理。
+    """
+    logger.info(f"Request to deactivate agent: {agent_id}")
+    
+    # 检查区块链连接
+    connection_status = contract_service.get_connection_status()
+    if connection_status["connected"] and connection_status["contracts"]["agent_registry"]:
+        try:
+            # 调用合约服务停用代理
+            result = contract_service.deactivate_agent(agent_id)
+            logger.info(f"Deactivate agent result: {result}")
+            
+            if result["success"]:
+                return {
+                    "success": True,
+                    "agent_id": agent_id,
+                    "transaction_hash": result["transaction_hash"],
+                    "block_number": result["block_number"],
+                    "deactivated_at": datetime.now().isoformat(),
+                    "source": "blockchain"
+                }
+            else:
+                logger.warning(f"Failed to deactivate agent on blockchain: {result.get('error')}")
+                error_str = str(result.get("error", "")).lower()
+                # 如果是"Agent not found"错误，直接返回404
+                if "not found" in error_str:
+                    raise HTTPException(status_code=404, detail="Agent not found")
+                # 如果是"Agent already inactive"错误，认为停用成功
+                elif "already inactive" in error_str:
+                    return {
+                        "success": True,
+                        "agent_id": agent_id,
+                        "transaction_hash": "already_inactive",
+                        "block_number": 0,
+                        "deactivated_at": datetime.now().isoformat(),
+                        "source": "blockchain",
+                        "note": "Agent was already inactive"
+                    }
+                else:
+                    # 其他错误，返回服务错误
+                    raise HTTPException(status_code=500, detail=f"Failed to deactivate agent: {error_str}")
+        except Exception as e:
+            logger.error(f"Error deactivating agent on blockchain: {str(e)}")
+            # 如果出现异常，也检查是否是agent不存在的问题
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # 如果区块链未连接或停用失败，返回服务不可用错误
     raise HTTPException(status_code=503, detail="Blockchain service unavailable")

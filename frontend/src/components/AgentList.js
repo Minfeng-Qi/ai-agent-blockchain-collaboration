@@ -33,7 +33,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { agentApi } from '../services/api';
 
-const AgentCard = ({ agent, onDelete }) => {
+const AgentCard = ({ agent, onDelete, onStatusToggle }) => {
   const navigate = useNavigate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -134,6 +134,8 @@ const AgentCard = ({ agent, onDelete }) => {
                 label={agent.active !== false ? 'Active' : 'Inactive'}
                 color={agent.active !== false ? 'success' : 'default'}
                 variant="outlined"
+                clickable
+                onClick={() => onStatusToggle && onStatusToggle(agentId, !agent.active)}
               />
               {agent.source === 'blockchain' && (
                 <Chip 
@@ -151,11 +153,9 @@ const AgentCard = ({ agent, onDelete }) => {
           {agentId}
         </Typography>
         
-        {agent.metadataURI && (
-          <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
-            Type: {agent.agentType === 1 ? 'LLM' : agent.agentType === 2 ? 'Orchestrator' : agent.agentType === 3 ? 'Evaluator' : 'Unknown'}
-          </Typography>
-        )}
+        <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
+          Type: {agent.agentType === 1 ? 'LLM' : agent.agentType === 2 ? 'Orchestrator' : agent.agentType === 3 ? 'Evaluator' : 'Unknown'}
+        </Typography>
         
         <Divider sx={{ my: 1 }} />
         
@@ -291,6 +291,7 @@ const AgentList = () => {
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarSeverity, setSnackbarSeverity] = useState('warning');
+  const [dataSource, setDataSource] = useState('blockchain');
   
   useEffect(() => {
     fetchAgents();
@@ -306,59 +307,25 @@ const AgentList = () => {
       
       if (data && data.agents) {
         setAgents(data.agents);
+        setDataSource(data.source || 'blockchain');
         console.log(`Successfully loaded ${data.agents.length} agents from ${data.source}`);
       } else {
         // 处理意外的响应格式
         setAgents([]);
+        setDataSource('unknown');
         setError('Unexpected response format from API');
         setSnackbarSeverity('warning');
         setSnackbarOpen(true);
       }
     } catch (error) {
       console.error('Error fetching agents:', error);
-      setError('Failed to fetch agents. Please check the API connection.');
-      setSnackbarSeverity('warning');
+      setError('Failed to fetch agents from blockchain. Please check the API connection.');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
       
-      // 使用示例数据作为后备
-      setAgents([
-        {
-          agent_id: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-          name: 'DataAnalysisAgent',
-          reputation: 85,
-          tasks_completed: 42,
-          capabilities: ['data_analysis', 'text_generation', 'classification'],
-          capability_weights: [90, 85, 75],
-          agentType: 1,
-          metadataURI: 'ipfs://QmExampleHash1',
-          active: true,
-          registeredAt: Date.now() - 86400000 * 30
-        },
-        {
-          agent_id: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-          name: 'TextGenerationAgent',
-          reputation: 75,
-          tasks_completed: 28,
-          capabilities: ['text_generation', 'translation', 'summarization'],
-          capability_weights: [88, 80, 70],
-          agentType: 1,
-          metadataURI: 'ipfs://QmExampleHash2',
-          active: true,
-          registeredAt: Date.now() - 86400000 * 15
-        },
-        {
-          agent_id: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
-          name: 'ClassificationAgent',
-          reputation: 80,
-          tasks_completed: 35,
-          capabilities: ['classification', 'data_analysis'],
-          capability_weights: [85, 78],
-          agentType: 2,
-          metadataURI: 'ipfs://QmExampleHash3',
-          active: true,
-          registeredAt: Date.now() - 86400000 * 10
-        }
-      ]);
+      // 不使用fallback数据，显示错误状态
+      setAgents([]);
+      setDataSource('error');
     } finally {
       setLoading(false);
     }
@@ -373,20 +340,45 @@ const AgentList = () => {
   };
   
   const handleAgentDelete = (agentId) => {
-    // Remove the deleted agent from the local state
+    // Remove the deleted agent from the local state immediately
     setAgents(prevAgents => prevAgents.filter(agent => 
       (agent.agent_id || agent.address) !== agentId
     ));
     
     // Show success message
-    setError(`Agent ${agentId.slice(-4)} has been successfully deleted`);
+    setError(`Agent ${agentId.slice(-4)} has been successfully deactivated`);
     setSnackbarSeverity('success');
     setSnackbarOpen(true);
     
-    // Optionally refresh the list to get updated data from server
-    setTimeout(() => {
-      fetchAgents(true);
-    }, 1000);
+    // Don't refresh automatically - the UI should reflect the immediate change
+  };
+
+  const handleStatusToggle = async (agentId, newStatus) => {
+    try {
+      if (newStatus) {
+        await agentApi.activateAgent(agentId);
+      } else {
+        await agentApi.deactivateAgent(agentId);
+      }
+      
+      // Update the local state immediately
+      setAgents(prevAgents => prevAgents.map(agent => 
+        (agent.agent_id || agent.address) === agentId 
+          ? { ...agent, active: newStatus }
+          : agent
+      ));
+      
+      // Show success message
+      setError(`Agent ${agentId.slice(-4)} has been ${newStatus ? 'activated' : 'deactivated'}`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+    } catch (error) {
+      console.error('Error toggling agent status:', error);
+      setError(`Failed to ${newStatus ? 'activate' : 'deactivate'} agent ${agentId.slice(-4)}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
   };
   
   const filteredAgents = agents.filter(agent => {
@@ -408,9 +400,17 @@ const AgentList = () => {
       </Snackbar>
       
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">
-          Agents
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h4">
+            Agents
+          </Typography>
+          <Chip 
+            label={dataSource === 'blockchain' ? 'Blockchain Data' : 'Local Data'}
+            color={dataSource === 'blockchain' ? 'success' : 'warning'}
+            size="small"
+            variant="outlined"
+          />
+        </Box>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button 
             variant="contained" 
@@ -456,7 +456,7 @@ const AgentList = () => {
           <Grid container spacing={3}>
             {filteredAgents.map((agent) => (
               <Grid item key={agent.agent_id || agent.address} xs={12} sm={6} md={4} lg={3}>
-                <AgentCard agent={agent} onDelete={handleAgentDelete} />
+                <AgentCard agent={agent} onDelete={handleAgentDelete} onStatusToggle={handleStatusToggle} />
               </Grid>
             ))}
           </Grid>

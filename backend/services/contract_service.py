@@ -57,15 +57,15 @@ def load_contract(contract_name: str):
         with open(abi_path, 'r') as f:
             contract_data = json.load(f)
         
-        # 自动生成的合约地址 (checksum格式)
+        # 更新的合约地址 (checksum格式) - 支持capabilities
         contract_addresses = {
-            "AgentRegistry": "0x3A8f03fE4e1539De6355B4C670a543450a05284D",
-            "ActionLogger": "0x4282123E125607DB3EdfB577bAc8e8B54214bf90",
-            "IncentiveEngine": "0x4506d2b5E3cEae9b711243C8F8eeE1d328A14f2c",
-            "TaskManager": "0x7AaF78567e139A0f286A175c26814Ab9Bfa9238f",
-            "BidAuction": "0xd6cFA33b9DeF7698884Eb5D528B01c1De77CAed4",
-            "MessageHub": "0x41C6d4DF7B89E83AC05B5703da13aE93cfD3d6BA",
-            "Learning": "0xC02A056b67b0117AD77cD4091ADc36417d15e186",
+            "AgentRegistry": "0x693531c8b4B86c43Fa489E75F986e8dECc9F2b10",
+            "ActionLogger": "0xA5906Dbc1fe7Bfae553781ec84B74BB76107A0be",
+            "IncentiveEngine": "0x15E2486E1F3aC8CF60906D8750c576173Bc57621",
+            "TaskManager": "0xD8b65A906be70f585Ad542700D6c609b1BD02C8F",
+            "BidAuction": "0x66f5Efca31046B8BaF4d10D9EA3180818F629852",
+            "MessageHub": "0x0284023242A9C9008f1a1C53c6B7530190CcA86D",
+            "Learning": "0xb51f71B437d7198AAecb8753C87bb7701DB82278",
         }
         
         contract_address = contract_addresses.get(contract_name)
@@ -163,9 +163,11 @@ def register_agent(agent_data: Dict[str, Any], sender_address: str) -> Dict[str,
         # 调用合约方法
         tx_hash = agent_registry_contract.functions.registerAgent(
             agent_data["name"],
-            agent_data["capabilities"],
-            agent_data["reputation"] if "reputation" in agent_data else 0,
-            agent_data["confidence_factor"] if "confidence_factor" in agent_data else 0
+            agent_data.get("capabilities", []),
+            agent_data.get("agent_type", 1),  # 默认为LLM类型
+            agent_data.get("reputation", 50),  # 默认reputation为50
+            agent_data.get("confidence_factor", 80),  # 默认confidence_factor为80
+            agent_data.get("capabilityWeights", [])  # capability weights数组
         ).transact(tx_data)
         
         # 等待交易确认
@@ -191,7 +193,7 @@ def register_agent(agent_data: Dict[str, Any], sender_address: str) -> Dict[str,
         logger.error(f"Error registering agent: {str(e)}")
         return {"success": False, "error": str(e)}
 
-def get_agent(agent_id: str) -> Dict[str, Any]:
+def get_agent(agent_address: str) -> Dict[str, Any]:
     """
     获取代理信息
     """
@@ -199,19 +201,54 @@ def get_agent(agent_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "Contract not initialized"}
     
     try:
-        agent_data = agent_registry_contract.functions.getAgent(agent_id).call()
+        agent_data = agent_registry_contract.functions.getAgent(agent_address).call()
+        
+        # 获取capability weights
+        capability_weights = []
+        try:
+            capabilities_data = agent_registry_contract.functions.getCapabilities(agent_address).call()
+            capability_weights = capabilities_data[1]  # weights数组
+        except Exception as e:
+            logger.warning(f"Error getting capabilities for agent {agent_address}: {str(e)}")
+            capability_weights = []
+        
         return {
             "success": True,
-            "agent_id": agent_id,
-            "name": agent_data[0],
-            "capabilities": agent_data[1],
-            "reputation": agent_data[2],
-            "confidence_factor": agent_data[3],
-            "registration_date": agent_data[4],
-            "active": agent_data[5]
+            "agent": {
+                "address": agent_address,
+                "name": agent_data[0],
+                "capabilities": agent_data[1],
+                "owner": agent_data[2],
+                "reputation": agent_data[3],
+                "active": agent_data[4],
+                "registered_at": agent_data[5],
+                "agent_type": agent_data[6],
+                "capability_weights": capability_weights
+            }
         }
     except Exception as e:
-        logger.error(f"Error getting agent {agent_id}: {str(e)}")
+        logger.error(f"Error getting agent {agent_address}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_bidding_strategy(agent_address: str) -> Dict[str, Any]:
+    """
+    获取代理的bidding strategy信息
+    """
+    if not agent_registry_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        bidding_data = agent_registry_contract.functions.agentBiddingStrategies(agent_address).call()
+        return {
+            "success": True,
+            "strategy": {
+                "confidence_factor": bidding_data[0],
+                "risk_tolerance": bidding_data[1],
+                "last_updated": bidding_data[2]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting bidding strategy for {agent_address}: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def get_all_agents() -> List[Dict[str, Any]]:
@@ -222,14 +259,14 @@ def get_all_agents() -> List[Dict[str, Any]]:
         return {"success": False, "error": "Contract not initialized"}
     
     try:
-        agent_count = agent_registry_contract.functions.getAgentCount().call()
+        # 使用getAllAgents函数获取所有agent地址
+        agent_addresses = agent_registry_contract.functions.getAllAgents().call()
         agents = []
         
-        for i in range(agent_count):
-            agent_id = agent_registry_contract.functions.agentIds(i).call()
-            agent_data = get_agent(agent_id)
-            if agent_data["success"]:
-                agents.append(agent_data)
+        for agent_address in agent_addresses:
+            agent_data = get_agent(agent_address)
+            if agent_data.get("success"):
+                agents.append(agent_data["agent"])
         
         return {"success": True, "agents": agents}
     except Exception as e:
@@ -735,9 +772,9 @@ def get_blockchain_stats() -> Dict[str, Any]:
             except:
                 pass
         
-        # 计算总交易数（扫描最近50个区块）
+        # 计算总交易数（扫描所有区块，但设置合理上限）
         total_transactions = 0
-        scan_blocks = min(50, latest_block + 1)
+        scan_blocks = min(100, latest_block + 1)  # 扫描最多100个区块或所有区块
         for i in range(latest_block, max(0, latest_block - scan_blocks), -1):
             try:
                 block = w3.eth.get_block(i)
@@ -1087,7 +1124,7 @@ def get_contract_agent_performance() -> Dict[str, Any]:
         
         for i in range(agent_count):
             try:
-                agent_address = agent_registry_contract.functions.agentIds(i).call()
+                agent_address = agent_registry_contract.functions.agentAddresses(i).call()
                 agent_data = agent_registry_contract.functions.agents(agent_address).call()
                 
                 performance_data.append({
@@ -1163,6 +1200,70 @@ def get_contract_task_completion_trend() -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 # 初始化合约
+def activate_agent(agent_address: str) -> Dict[str, Any]:
+    """
+    激活智能体
+    """
+    if not agent_registry_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 准备交易数据
+        tx_data = {
+            "from": agent_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(agent_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = agent_registry_contract.functions.activateAgent(agent_address).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "agent_id": agent_address,
+            "block_number": receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error activating agent: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def deactivate_agent(agent_address: str) -> Dict[str, Any]:
+    """
+    停用智能体
+    """
+    if not agent_registry_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 准备交易数据
+        tx_data = {
+            "from": agent_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(agent_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = agent_registry_contract.functions.deactivateAgent(agent_address).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "agent_id": agent_address,
+            "block_number": receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error deactivating agent: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 try:
     if w3 and w3.is_connected():
         initialize_contracts()

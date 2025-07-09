@@ -32,8 +32,7 @@ const CreateAgent = () => {
     capabilityWeights: {},
     reputation: 50,
     confidence_factor: 80,
-    agentType: 1,
-    metadataURI: ''
+    agentType: 1
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -84,7 +83,6 @@ const CreateAgent = () => {
     if (!formData.capabilities.length) newErrors.capabilities = 'At least one capability is required';
     if (formData.reputation < 0 || formData.reputation > 100) newErrors.reputation = 'Reputation must be between 0-100';
     if (formData.confidence_factor < 0 || formData.confidence_factor > 100) newErrors.confidence_factor = 'Confidence factor must be between 0-100';
-    if (!formData.metadataURI.trim()) newErrors.metadataURI = 'Metadata URI is required';
     
     // Validate capability weights
     for (const cap of formData.capabilities) {
@@ -110,8 +108,7 @@ const CreateAgent = () => {
       
       const agentData = {
         name: formData.name,
-        metadataURI: formData.metadataURI,
-        agentType: formData.agentType,
+        agent_type: formData.agentType,
         capabilities: capabilityTags,
         capabilityWeights: capabilityWeights,
         reputation: Number(formData.reputation),
@@ -177,19 +174,6 @@ const CreateAgent = () => {
                 required
                 error={!!errors.name}
                 helperText={errors.name}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label="Metadata URI"
-                name="metadataURI"
-                value={formData.metadataURI}
-                onChange={handleChange}
-                fullWidth
-                required
-                error={!!errors.metadataURI}
-                helperText={errors.metadataURI || "IPFS URI pointing to agent capabilities and metadata"}
-                placeholder="ipfs://QmExampleHash..."
               />
             </Grid>
             <Grid item xs={12}>

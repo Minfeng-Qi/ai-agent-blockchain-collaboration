@@ -18,7 +18,7 @@ contract AgentRegistry is Ownable {
 
     struct Agent {
         string name;
-        string metadataURI;  // URI pointing to agent capabilities (stored on IPFS)
+        string[] capabilities;  // Array of agent capabilities
         address owner;       // Address that can update agent info
         uint256 reputation;  // Agent reputation score (0-100)
         bool active;         // Whether the agent is currently active
@@ -88,14 +88,14 @@ contract AgentRegistry is Ownable {
     event AgentRegistered(
         address indexed agentAddress,
         string name,
-        string metadataURI,
+        string[] capabilities,
         uint256 timestamp
     );
     
     event AgentUpdated(
         address indexed agentAddress,
         string name,
-        string metadataURI,
+        string[] capabilities,
         uint256 timestamp
     );
     
@@ -152,21 +152,27 @@ contract AgentRegistry is Ownable {
     /**
      * @dev Register a new agent
      * @param name Name of the agent
-     * @param metadataURI URI pointing to agent capabilities
+     * @param capabilities Array of agent capabilities
      * @param agentType Type of agent in the system
      */
     function registerAgent(
         string memory name,
-        string memory metadataURI,
-        AgentType agentType
+        string[] memory capabilities,
+        AgentType agentType,
+        uint256 reputation,
+        uint256 confidenceFactor,
+        uint256[] memory weights
     ) external {
         require(agents[msg.sender].registeredAt == 0, "Agent already registered");
+        require(reputation >= 0 && reputation <= 100, "Reputation must be between 0-100");
+        require(confidenceFactor >= 0 && confidenceFactor <= 100, "Confidence factor must be between 0-100");
+        require(capabilities.length == weights.length, "Capabilities and weights arrays must have same length");
         
         agents[msg.sender] = Agent({
             name: name,
-            metadataURI: metadataURI,
+            capabilities: capabilities,
             owner: msg.sender,
-            reputation: 50,  // Default starting reputation
+            reputation: reputation,
             active: true,    // Active by default
             registeredAt: block.timestamp,
             agentType: agentType
@@ -175,28 +181,35 @@ contract AgentRegistry is Ownable {
         // Add to list of agents
         agentAddresses.push(msg.sender);
 
-        // Initialize bidding strategy with default values
+        // Initialize capability weights
+        agentCapabilityTags[msg.sender] = capabilities;
+        for (uint256 i = 0; i < capabilities.length; i++) {
+            require(weights[i] >= 1 && weights[i] <= 100, "Capability weights must be between 1-100");
+            capabilityWeights[msg.sender][capabilities[i]] = weights[i];
+        }
+
+        // Initialize bidding strategy with user-provided values
         agentBiddingStrategies[msg.sender] = BiddingStrategy({
-            confidenceFactor: 80,  // 80% confidence
-            riskTolerance: 50,     // 50% risk tolerance
+            confidenceFactor: confidenceFactor,
+            riskTolerance: 50,     // Default risk tolerance
             lastUpdated: block.timestamp
         });
         
-        emit AgentRegistered(msg.sender, name, metadataURI, block.timestamp);
+        emit AgentRegistered(msg.sender, name, capabilities, block.timestamp);
     }
 
     /**
      * @dev Update agent information
      * @param name New name of the agent
-     * @param metadataURI New URI pointing to agent capabilities
+     * @param capabilities New array of agent capabilities
      */
-    function updateAgent(string memory name, string memory metadataURI) external {
+    function updateAgent(string memory name, string[] memory capabilities) external {
         require(agents[msg.sender].registeredAt > 0, "Agent not registered");
         
         agents[msg.sender].name = name;
-        agents[msg.sender].metadataURI = metadataURI;
+        agents[msg.sender].capabilities = capabilities;
         
-        emit AgentUpdated(msg.sender, name, metadataURI, block.timestamp);
+        emit AgentUpdated(msg.sender, name, capabilities, block.timestamp);
     }
 
     /**
@@ -626,6 +639,16 @@ contract AgentRegistry is Ownable {
             block.timestamp
         );
     }
+    /**
+     * @dev Get agent details by address
+     * @param agentAddress Address of the agent
+     * @return Agent details
+     */
+    function getAgent(address agentAddress) external view returns (Agent memory) {
+        require(agents[agentAddress].registeredAt > 0, "Agent not registered");
+        return agents[agentAddress];
+    }
+    
     /**
      * @dev Get all registered agent addresses
      * @return Array of agent addresses
