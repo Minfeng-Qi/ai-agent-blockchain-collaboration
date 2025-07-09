@@ -26,10 +26,11 @@ echo -e "${BLUE}📋 启动选项:${NC}"
 echo "1. 完整启动 (区块链 + 后端 + 前端)"
 echo "2. 仅启动前端 (使用模拟数据)"
 echo "3. 区块链 + 后端 (不启动前端)"
-echo "4. 查看服务状态"
-echo "5. 停止所有服务"
+echo "4. 仅启动后端 (一键启动，推荐)"
+echo "5. 查看服务状态"
+echo "6. 停止所有服务"
 
-read -p "请选择 (1-5): " choice
+read -p "请选择 (1-6): " choice
 
 case $choice in
     1)
@@ -37,7 +38,7 @@ case $choice in
         
         # 1. 启动Ganache
         echo -e "${BLUE}📦 启动Ganache区块链...${NC}"
-        npx ganache --host 0.0.0.0 --port 8545 --chain.chainId 1337 --accounts 10 --deterministic > ganache.log 2>&1 &
+        npx ganache --host 0.0.0.0 --port 8545 --chain.chainId 5777 --accounts 10 --deterministic > ganache.log 2>&1 &
         GANACHE_PID=$!
         echo $GANACHE_PID > ganache.pid
         sleep 3
@@ -98,6 +99,11 @@ case $choice in
         ;;
         
     4)
+        echo -e "${GREEN}🔧 仅启动后端 (一键启动)...${NC}"
+        ./start_backend.sh
+        ;;
+        
+    5)
         echo -e "${BLUE}📊 检查服务状态...${NC}"
         
         # 检查Ganache

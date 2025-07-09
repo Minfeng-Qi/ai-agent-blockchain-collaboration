@@ -26,7 +26,7 @@ cd frontend && npm start
 
 ### 1. 启动Ganache区块链
 ```bash
-npx ganache --host 0.0.0.0 --port 8545 --chain.chainId 1337 --accounts 10 --deterministic > ganache.log 2>&1 &
+npx ganache --host 0.0.0.0 --port 8545 --chain.chainId 5777 --accounts 10 --deterministic > ganache.log 2>&1 &
 echo $! > ganache.pid
 ```
 

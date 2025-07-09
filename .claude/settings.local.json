@@ -83,7 +83,10 @@
       "Bash(rm:*)",
       "Bash(pip3 install:*)",
       "Bash(backend/venv/bin/python test_agent_registration.py:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(./stop_backend.sh:*)",
+      "Bash(./start_backend.sh:*)",
+      "Bash(open:*)"
     ],
     "deny": []
   }

@@ -52,13 +52,13 @@ def load_contract(contract_name: str):
         
         # 自动生成的合约地址 (checksum格式)
         contract_addresses = {
-            "AgentRegistry": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
-            "ActionLogger": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24",
-            "IncentiveEngine": "0xCfEB869F69431e42cdB54A4F4f105C19C080A601",
-            "TaskManager": "0xC89Ce4735882C9F0f0FE26686c53074E09B0D550",
-            "BidAuction": "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb",
-            "MessageHub": "0x0290FB167208Af455bB137780163b7B7a9a10C16",
-            "Learning": "0x9b1f7F645351AF3631a656421eD2e40f2802E6c0",
+            "AgentRegistry": "0x884dd07b864c7e3Ecef01BEfFEB07731a92B9d53",
+            "ActionLogger": "0x56F52B666D53a6555182F5Cc56d73c0c08b36a98",
+            "IncentiveEngine": "0x320ffb6049caE8C0A30F07773fd01E615E123fa8",
+            "TaskManager": "0x9bf9F7F340C7310f32d33B57E4AccDb44c27E4a4",
+            "BidAuction": "0xA28A1DB2D920Ad8E1Db8B72a87628f1bE0B400A1",
+            "MessageHub": "0xDE87D8becB4df477415Cbe74815BF7D2483120E9",
+            "Learning": "0x5d862DB17aAb6e906ddb1234f3e01db2D835F265",
         }
         
         contract_address = contract_addresses.get(contract_name)
@@ -505,15 +505,15 @@ def get_transaction(tx_hash: str) -> Dict[str, Any]:
             "block_number": tx.blockNumber,
             "timestamp": block.timestamp,
             "from_address": tx["from"],
-            "to_address": tx["to"],
-            "value": w3.from_wei(tx.value, "ether"),
+            "to_address": tx["to"] if tx["to"] else "0x0000000000000000000000000000000000000000",
+            "value": float(w3.from_wei(tx.value, "ether")),
             "gas_used": receipt.gasUsed,
-            "gas_price": w3.from_wei(tx.gasPrice, "gwei"),
-            "total_fee": w3.from_wei(tx.gasPrice * receipt.gasUsed, "ether"),
+            "gas_price": float(w3.from_wei(tx.gasPrice, "gwei")),
+            "total_fee": float(w3.from_wei(tx.gasPrice * receipt.gasUsed, "ether")),
             "status": "confirmed" if receipt.status == 1 else "failed",
             "event_type": event_type,
-            "event_data": event_data,
-            "input_data": tx.input,
+            "event_data": {k: str(v) for k, v in event_data.items()},  # 确保所有值都是字符串
+            "input_data": tx.input.hex() if hasattr(tx.input, 'hex') else str(tx.input),
             "confirmations": w3.eth.block_number - tx.blockNumber
         }
     except Exception as e:
@@ -533,25 +533,27 @@ def get_block(block_number: int) -> Dict[str, Any]:
         
         return {
             "success": True,
+            "block_number": block.number,
             "number": block.number,
-            "hash": block.hash.hex(),
-            "parent_hash": block.parentHash.hex(),
+            "hash": f"0x{block.hash.hex()}" if hasattr(block.hash, 'hex') else str(block.hash),
+            "parent_hash": f"0x{block.parentHash.hex()}" if hasattr(block.parentHash, 'hex') else str(block.parentHash),
             "timestamp": block.timestamp,
+            "transaction_count": len(block.transactions),
             "transactions": len(block.transactions),
             "miner": block.miner,
             "gas_used": block.gasUsed,
             "gas_limit": block.gasLimit,
             "difficulty": block.difficulty,
-            "total_difficulty": block.totalDifficulty,
+            "total_difficulty": block.totalDifficulty if hasattr(block, 'totalDifficulty') else 0,
             "size": block.size,
-            "extra_data": block.extraData.hex(),
-            "nonce": block.nonce.hex()
+            "extra_data": f"0x{block.extraData.hex()}" if hasattr(block, 'extraData') and block.extraData else "0x",
+            "nonce": f"0x{block.nonce.hex()}" if hasattr(block, 'nonce') and block.nonce else "0x0"
         }
     except Exception as e:
         logger.error(f"Error getting block {block_number}: {str(e)}")
         return {"success": False, "error": str(e)}
 
-def get_transactions(filters: Dict[str, Any] = None, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+def get_transactions(filters: Dict[str, Any] = None, limit: int = 10, offset: int = 0) -> Dict[str, Any]:
     """
     获取交易列表
     """
@@ -575,32 +577,46 @@ def get_transactions(filters: Dict[str, Any] = None, limit: int = 10, offset: in
         
         # 收集交易
         tx_count = 0
+        collected_count = 0
+        
         for block_num in range(end_block - 1, start_block - 1, -1):
-            block = w3.eth.get_block(block_num, full_transactions=False)
-            
-            for tx_hash in block.transactions:
-                if tx_count < offset:
-                    tx_count += 1
-                    continue
-                    
-                if len(transactions) >= limit:
-                    break
+            try:
+                block = w3.eth.get_block(block_num, full_transactions=False)
                 
-                tx_data = get_transaction(tx_hash.hex())
-                if tx_data["success"]:
-                    # 应用过滤器
-                    if "event_type" in filters and tx_data["event_type"] != filters["event_type"]:
+                for tx_hash in block.transactions:
+                    if tx_count < offset:
+                        tx_count += 1
                         continue
-                    if "from_address" in filters and tx_data["from_address"].lower() != filters["from_address"].lower():
-                        continue
-                    if "to_address" in filters and tx_data["to_address"].lower() != filters["to_address"].lower():
-                        continue
+                        
+                    if collected_count >= limit:
+                        break
                     
-                    transactions.append(tx_data)
+                    tx_data = get_transaction(tx_hash.hex())
+                    if tx_data.get("success"):
+                        # 应用过滤器
+                        if "event_type" in filters and tx_data.get("event_type") != filters["event_type"]:
+                            tx_count += 1
+                            continue
+                        if "from_address" in filters and tx_data.get("from_address", "").lower() != filters["from_address"].lower():
+                            tx_count += 1
+                            continue
+                        if "to_address" in filters and tx_data.get("to_address", "").lower() != filters["to_address"].lower():
+                            tx_count += 1
+                            continue
+                        
+                        # 移除success字段，只保留交易数据
+                        tx_clean = {k: v for k, v in tx_data.items() if k != "success"}
+                        transactions.append(tx_clean)
+                        collected_count += 1
+                        
                     tx_count += 1
-            
-            if len(transactions) >= limit:
-                break
+                
+                if collected_count >= limit:
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"Error processing block {block_num}: {str(e)}")
+                continue
         
         return {"success": True, "transactions": transactions, "total": tx_count}
     except Exception as e:
@@ -724,6 +740,180 @@ def get_blockchain_stats() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error getting blockchain stats: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_blocks(limit: int = 10, offset: int = 0) -> Dict[str, Any]:
+    """
+    获取区块列表
+    """
+    if not w3 or not w3.is_connected():
+        return {"success": False, "error": "Web3 not connected"}
+    
+    try:
+        latest_block = w3.eth.block_number
+        blocks = []
+        
+        # 计算开始和结束区块号
+        start_block = max(0, latest_block - offset)
+        end_block = max(0, start_block - limit)
+        
+        # 获取区块信息
+        for block_num in range(start_block, end_block, -1):
+            try:
+                block = w3.eth.get_block(block_num, full_transactions=False)
+                block_data = {
+                    "block_number": block.number,
+                    "number": block.number,
+                    "hash": f"0x{block.hash.hex()}" if hasattr(block.hash, 'hex') else str(block.hash),
+                    "parent_hash": f"0x{block.parentHash.hex()}" if hasattr(block.parentHash, 'hex') else str(block.parentHash),
+                    "timestamp": block.timestamp,
+                    "transaction_count": len(block.transactions),
+                    "transactions": len(block.transactions),
+                    "miner": block.miner,
+                    "gas_used": block.gasUsed,
+                    "gas_limit": block.gasLimit,
+                    "difficulty": block.difficulty,
+                    "total_difficulty": block.totalDifficulty if hasattr(block, 'totalDifficulty') else 0,
+                    "size": block.size,
+                    "extra_data": f"0x{block.extraData.hex()}" if hasattr(block, 'extraData') and block.extraData else "0x",
+                    "nonce": f"0x{block.nonce.hex()}" if hasattr(block, 'nonce') and block.nonce else "0x0"
+                }
+                blocks.append(block_data)
+            except Exception as e:
+                logger.warning(f"Error getting block {block_num}: {str(e)}")
+                continue
+        
+        return {
+            "success": True,
+            "blocks": blocks,
+            "total": len(blocks),
+            "latest_block": latest_block
+        }
+    except Exception as e:
+        logger.error(f"Error getting blocks: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_all_events(filters: Dict[str, Any] = None, limit: int = 10, offset: int = 0) -> Dict[str, Any]:
+    """
+    获取所有合约事件
+    """
+    if not w3 or not w3.is_connected():
+        return {"success": False, "error": "Web3 not connected"}
+    
+    try:
+        latest_block = w3.eth.block_number
+        events = []
+        
+        # 确定区块范围
+        from_block = filters.get("from_block", max(0, latest_block - 100)) if filters else max(0, latest_block - 100)
+        to_block = filters.get("to_block", latest_block) if filters else latest_block
+        
+        # 获取所有合约的事件
+        contract_map = {
+            "AgentRegistry": agent_registry_contract,
+            "TaskManager": task_manager_contract,
+            "Learning": learning_contract,
+            "ActionLogger": action_logger_contract,
+            "IncentiveEngine": incentive_engine_contract,
+            "BidAuction": bid_auction_contract,
+            "MessageHub": message_hub_contract
+        }
+        
+        for contract_name, contract in contract_map.items():
+            if not contract:
+                continue
+                
+            try:
+                # 获取该合约的所有事件
+                # 使用getLogs来获取合约的所有事件
+                logs = w3.eth.get_logs({
+                    'fromBlock': from_block,
+                    'toBlock': to_block,
+                    'address': contract.address
+                })
+                
+                for log in logs:
+                    try:
+                        # 尝试解码日志 - 需要遍历所有可能的事件类型
+                        decoded_log = None
+                        event_name = "UnknownEvent"
+                        
+                        # 根据合约类型尝试不同的事件
+                        if contract_name == "Learning":
+                            event_types = ["LearningEventRecorded", "SkillImprovement", "TaskCompletion", "CollaborationEvent", "LearningMilestone"]
+                        elif contract_name == "AgentRegistry":
+                            event_types = ["AgentRegistered", "AgentUpdated", "AgentActivated", "AgentDeactivated", "CapabilitiesUpdated", "TaskScoreRecorded"]
+                        elif contract_name == "TaskManager":
+                            event_types = ["TaskCreated", "TaskStatusUpdated", "TaskAssigned", "TaskCompleted", "TaskFailed", "TaskEvaluated"]
+                        else:
+                            event_types = []
+                        
+                        # 尝试解码事件
+                        for event_type in event_types:
+                            try:
+                                if hasattr(contract.events, event_type):
+                                    event_method = getattr(contract.events, event_type)
+                                    decoded_log = event_method().process_log(log)
+                                    event_name = event_type
+                                    break
+                            except:
+                                continue
+                        
+                        if decoded_log:
+                            event_data = {
+                                "event_id": f"{decoded_log.transactionHash.hex()}_{decoded_log.logIndex}",
+                                "contract_name": contract_name,
+                                "contract_address": decoded_log.address,
+                                "event_name": event_name,
+                                "block_number": decoded_log.blockNumber,
+                                "tx_hash": decoded_log.transactionHash.hex(),
+                                "timestamp": w3.eth.get_block(decoded_log.blockNumber).timestamp,
+                                "parameters": {k: str(v) for k, v in decoded_log.args.items()},
+                                "data": {k: str(v) for k, v in decoded_log.args.items()}
+                            }
+                            events.append(event_data)
+                        else:
+                            # 创建通用事件数据
+                            event_data = {
+                                "event_id": f"{log.transactionHash.hex()}_{log.logIndex}",
+                                "contract_name": contract_name,
+                                "contract_address": log.address,
+                                "event_name": "UnknownEvent",
+                                "block_number": log.blockNumber,
+                                "tx_hash": log.transactionHash.hex(),
+                                "timestamp": w3.eth.get_block(log.blockNumber).timestamp,
+                                "parameters": {"raw_data": log.data.hex()},
+                                "data": {"raw_data": log.data.hex()}
+                            }
+                            events.append(event_data)
+                            
+                    except Exception as e:
+                        logger.warning(f"Error processing log from {contract_name}: {str(e)}")
+                        continue
+            except Exception as e:
+                logger.warning(f"Error getting events from {contract_name}: {str(e)}")
+                continue
+        
+        # 按区块号排序
+        events.sort(key=lambda x: x["block_number"], reverse=True)
+        
+        # 应用过滤器
+        if filters:
+            if "contract_address" in filters:
+                events = [e for e in events if e["contract_address"].lower() == filters["contract_address"].lower()]
+            if "event_name" in filters:
+                events = [e for e in events if e["event_name"] == filters["event_name"]]
+        
+        # 应用分页
+        paginated_events = events[offset:offset + limit]
+        
+        return {
+            "success": True,
+            "events": paginated_events,
+            "total": len(events)
+        }
+    except Exception as e:
+        logger.error(f"Error getting all events: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def record_collaboration_ipfs(collaboration_id: str, ipfs_cid: str, task_id: str, sender_address: str) -> Dict[str, Any]:
