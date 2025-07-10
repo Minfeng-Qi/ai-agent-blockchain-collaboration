@@ -206,8 +206,13 @@ const TaskList = () => {
     setSnackbarOpen(false);
   };
   
-  // 根据搜索词过滤任务
+  // 根据搜索词过滤任务 - 排除已取消/删除的任务
   const filteredTasks = tasks.filter(task => {
+    // 首先过滤掉cancelled状态的任务
+    if (task.status === 'cancelled' || task.status === 'canceled') {
+      return false;
+    }
+    
     const titleMatch = task.title?.toLowerCase().includes(searchTerm.toLowerCase()) || false;
     const descMatch = task.description?.toLowerCase().includes(searchTerm.toLowerCase()) || false;
     const idMatch = task.task_id?.toLowerCase().includes(searchTerm.toLowerCase()) || false;
@@ -219,13 +224,22 @@ const TaskList = () => {
   const paginatedTasks = filteredTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   
   // 格式化日期
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'N/A';
     try {
-      return new Date(dateString).toLocaleString();
+      // 如果是Unix timestamp (数字)，转换为毫秒
+      const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp);
+      return date.toLocaleString();
     } catch (e) {
-      return dateString;
+      return timestamp;
     }
+  };
+
+  // 格式化Task ID - 只显示前8位和后4位
+  const formatTaskId = (taskId) => {
+    if (!taskId) return 'N/A';
+    if (taskId.length <= 12) return taskId;
+    return `${taskId.substring(0, 8)}...${taskId.substring(taskId.length - 4)}`;
   };
   
   return (
@@ -348,7 +362,7 @@ const TaskList = () => {
                       onClick={() => navigate(`/tasks/${task.task_id}`)}
                       sx={{ cursor: 'pointer' }}
                     >
-                      <TableCell>{task.task_id}</TableCell>
+                      <TableCell title={task.task_id}>{formatTaskId(task.task_id)}</TableCell>
                       <TableCell>{task.title || task.description}</TableCell>
                       <TableCell>
                         <TaskStatusChip status={task.status} />

@@ -50,8 +50,7 @@ const TaskDetails = () => {
   const [loading, setLoading] = useState(true);
   const [task, setTask] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [bidDialogOpen, setBidDialogOpen] = useState(false);
-  const [bidAmount, setBidAmount] = useState('');
+  const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   
@@ -59,6 +58,18 @@ const TaskDetails = () => {
     fetchTaskDetails();
   }, [taskId]);
   
+  // 格式化时间戳
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return 'N/A';
+    try {
+      // 如果是Unix timestamp (数字)，转换为毫秒
+      const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp);
+      return date.toLocaleString();
+    } catch (e) {
+      return timestamp;
+    }
+  };
+
   const fetchTaskDetails = async () => {
     setLoading(true);
     setError(null);
@@ -88,18 +99,6 @@ const TaskDetails = () => {
         reward: 0.5,
         complexity: 'medium',
         tags: ['market research', 'technology', 'consumer behavior'],
-        bids: [
-          {
-            agent_id: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-            amount: 0.45,
-            timestamp: Math.floor(Date.now() / 1000) - 64800
-          },
-          {
-            agent_id: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-            amount: 0.55,
-            timestamp: Math.floor(Date.now() / 1000) - 75600
-          }
-        ],
         history: [
           {
             event: 'created',
@@ -107,19 +106,14 @@ const TaskDetails = () => {
             details: 'Task created'
           },
           {
-            event: 'bid',
-            timestamp: Math.floor(Date.now() / 1000) - 75600,
-            details: 'Bid placed by 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
-          },
-          {
-            event: 'bid',
-            timestamp: Math.floor(Date.now() / 1000) - 64800,
-            details: 'Bid placed by 0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+            event: 'collaboration_started',
+            timestamp: Math.floor(Date.now() / 1000) - 43200,
+            details: 'Agent collaboration started with 3 selected agents'
           },
           {
             event: 'assigned',
             timestamp: Math.floor(Date.now() / 1000) - 43200,
-            details: 'Task assigned to 0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+            details: 'Task assigned to agent collaboration team'
           }
         ]
       };
@@ -147,18 +141,24 @@ const TaskDetails = () => {
     }
   };
   
-  const handlePlaceBid = async () => {
+  const handleStartCollaboration = async () => {
+    setCollaborationLoading(true);
     try {
-      await taskApi.placeBid(taskId, {
-        amount: parseFloat(bidAmount)
-      });
-      setBidDialogOpen(false);
-      fetchTaskDetails(); // Refresh task data
+      const response = await taskApi.startCollaboration(taskId, {});
+      if (response.success) {
+        setError(`Collaboration started successfully! ID: ${response.collaboration_id}`);
+        setSnackbarOpen(true);
+        fetchTaskDetails(); // Refresh task data
+      } else {
+        setError('Failed to start collaboration: ' + response.error);
+        setSnackbarOpen(true);
+      }
     } catch (error) {
-      console.error('Error placing bid:', error);
-      setBidDialogOpen(false);
-      setError('Failed to place bid');
+      console.error('Error starting collaboration:', error);
+      setError('Failed to start collaboration');
       setSnackbarOpen(true);
+    } finally {
+      setCollaborationLoading(false);
     }
   };
   
@@ -252,9 +252,11 @@ const TaskDetails = () => {
             <Button 
               variant="contained" 
               color="primary"
-              onClick={() => setBidDialogOpen(true)}
+              onClick={handleStartCollaboration}
+              disabled={collaborationLoading}
+              startIcon={collaborationLoading ? <CircularProgress size={20} /> : null}
             >
-              Place Bid
+              {collaborationLoading ? 'Starting...' : 'Start Agent Collaboration'}
             </Button>
           )}
           <Button 
@@ -316,19 +318,23 @@ const TaskDetails = () => {
               </Stepper>
             </Box>
             
-            <Grid container spacing={2}>
+            <Grid container spacing={3}>
               <Grid item xs={12} sm={6}>
-                <List dense>
-                  <ListItem>
+                <List>
+                  <ListItem sx={{ pb: 2 }}>
                     <ListItemIcon>
                       <AssignmentIcon />
                     </ListItemIcon>
                     <ListItemText 
                       primary="Task ID" 
-                      secondary={task.task_id} 
+                      secondary={
+                        <Box sx={{ mt: 0.5, wordBreak: 'break-all' }}>
+                          {task.task_id}
+                        </Box>
+                      } 
                     />
                   </ListItem>
-                  <ListItem>
+                  <ListItem sx={{ pb: 2 }}>
                     <ListItemIcon>
                       <AttachMoneyIcon />
                     </ListItemIcon>
@@ -337,21 +343,21 @@ const TaskDetails = () => {
                       secondary={`${task.reward} ETH`} 
                     />
                   </ListItem>
-                  <ListItem>
+                  <ListItem sx={{ pb: 2 }}>
                     <ListItemIcon>
                       <CalendarTodayIcon />
                     </ListItemIcon>
                     <ListItemText 
                       primary="Created" 
-                      secondary={new Date(task.created_at * 1000).toLocaleString()} 
+                      secondary={formatTimestamp(task.created_at)} 
                     />
                   </ListItem>
                 </List>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <List dense>
+                <List>
                   {task.assigned_agent && (
-                    <ListItem>
+                    <ListItem sx={{ pb: 2 }}>
                       <ListItemIcon>
                         <PersonIcon />
                       </ListItemIcon>
@@ -362,7 +368,8 @@ const TaskDetails = () => {
                             sx={{ 
                               display: 'flex', 
                               alignItems: 'center',
-                              cursor: 'pointer'
+                              cursor: 'pointer',
+                              mt: 0.5
                             }}
                             onClick={() => navigate(`/agents/${task.assigned_agent}`)}
                           >
@@ -383,18 +390,18 @@ const TaskDetails = () => {
                     </ListItem>
                   )}
                   {task.deadline && (
-                    <ListItem>
+                    <ListItem sx={{ pb: 2 }}>
                       <ListItemIcon>
                         <AccessTimeIcon />
                       </ListItemIcon>
                       <ListItemText 
                         primary="Deadline" 
-                        secondary={new Date(task.deadline * 1000).toLocaleString()} 
+                        secondary={formatTimestamp(task.deadline)} 
                       />
                     </ListItem>
                   )}
                   {task.complexity && (
-                    <ListItem>
+                    <ListItem sx={{ pb: 2 }}>
                       <ListItemIcon>
                         <AssignmentIcon />
                       </ListItemIcon>
@@ -479,60 +486,57 @@ const TaskDetails = () => {
         <Grid item xs={12} md={4}>
           <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Bids
+              {task.status === 'open' ? 'Required Capabilities' : 'Assigned Agents'}
             </Typography>
-            {task.bids && task.bids.length > 0 ? (
-              <List>
-                {task.bids.map((bid, index) => (
-                  <ListItem key={index} divider={index < task.bids.length - 1}>
-                    <ListItemIcon>
-                      <Avatar 
-                        sx={{ 
-                          bgcolor: generateAvatarColor(bid.agent_id) 
-                        }}
-                      >
-                        {bid.agent_id.substring(2, 4)}
-                      </Avatar>
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary={
-                        <Box 
-                          sx={{ 
-                            display: 'flex', 
-                            alignItems: 'center',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => navigate(`/agents/${bid.agent_id}`)}
-                        >
-                          {formatAddress(bid.agent_id)}
-                        </Box>
-                      }
-                      secondary={`Bid: ${bid.amount} ETH • ${new Date(bid.timestamp * 1000).toLocaleString()}`}
+            {task.status === 'open' ? (
+              <Box>
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  Agents with these capabilities will be automatically selected:
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
+                  {task.required_capabilities && task.required_capabilities.map((capability, index) => (
+                    <Chip 
+                      key={index}
+                      label={capability}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
                     />
-                    {task.status === 'open' && (
-                      <Button 
-                        variant="contained" 
-                        size="small"
-                        onClick={async () => {
-                          try {
-                            await taskApi.assignTask(task.task_id, bid.agent_id);
-                            fetchTaskDetails();
-                          } catch (error) {
-                            console.error('Error assigning task:', error);
-                            setError('Failed to assign task');
-                            setSnackbarOpen(true);
-                          }
+                  ))}
+                </Box>
+              </Box>
+            ) : task.assigned_agent ? (
+              <List>
+                <ListItem>
+                  <ListItemIcon>
+                    <Avatar 
+                      sx={{ 
+                        bgcolor: generateAvatarColor(task.assigned_agent) 
+                      }}
+                    >
+                      {task.assigned_agent.substring(2, 4)}
+                    </Avatar>
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={
+                      <Box 
+                        sx={{ 
+                          display: 'flex', 
+                          alignItems: 'center',
+                          cursor: 'pointer'
                         }}
+                        onClick={() => navigate(`/agents/${task.assigned_agent}`)}
                       >
-                        Accept
-                      </Button>
-                    )}
-                  </ListItem>
-                ))}
+                        {formatAddress(task.assigned_agent)}
+                      </Box>
+                    }
+                    secondary="Primary assigned agent"
+                  />
+                </ListItem>
               </List>
             ) : (
               <Typography variant="body2" color="textSecondary">
-                No bids yet
+                No agents assigned yet
               </Typography>
             )}
           </Paper>
@@ -609,42 +613,6 @@ const TaskDetails = () => {
           </Button>
           <Button onClick={handleDeleteTask} color="error" variant="contained">
             Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
-      
-      {/* Bid Dialog */}
-      <Dialog
-        open={bidDialogOpen}
-        onClose={() => setBidDialogOpen(false)}
-      >
-        <DialogTitle>Place Bid</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Current reward: {task.reward} ETH
-          </Typography>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Your Bid (ETH)"
-            type="number"
-            fullWidth
-            value={bidAmount}
-            onChange={(e) => setBidAmount(e.target.value)}
-            inputProps={{ step: 0.01, min: 0 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBidDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handlePlaceBid} 
-            color="primary" 
-            variant="contained"
-            disabled={!bidAmount || parseFloat(bidAmount) <= 0}
-          >
-            Submit Bid
           </Button>
         </DialogActions>
       </Dialog>
