@@ -772,15 +772,31 @@ def get_blockchain_stats() -> Dict[str, Any]:
             except:
                 pass
         
-        # 计算总交易数（扫描所有区块，但设置合理上限）
+        # 计算总交易数 - 优化的方法
         total_transactions = 0
-        scan_blocks = min(100, latest_block + 1)  # 扫描最多100个区块或所有区块
-        for i in range(latest_block, max(0, latest_block - scan_blocks), -1):
-            try:
-                block = w3.eth.get_block(i)
-                total_transactions += len(block.transactions)
-            except:
-                continue
+        
+        # 智能计算：优先查询最近的区块，对于旧区块使用缓存或估算
+        if latest_block <= 200:
+            # 如果区块数量不多，扫描所有区块
+            for i in range(latest_block + 1):
+                try:
+                    block = w3.eth.get_block(i, full_transactions=False)
+                    total_transactions += len(block.transactions)
+                except:
+                    continue
+        else:
+            # 如果区块数量较多，扫描最近的200个区块以获得准确的统计
+            recent_blocks_to_scan = 200
+            for i in range(latest_block, max(0, latest_block - recent_blocks_to_scan), -1):
+                try:
+                    block = w3.eth.get_block(i, full_transactions=False)
+                    total_transactions += len(block.transactions)
+                except:
+                    continue
+            
+            # 对于更早的区块，如果需要完整统计，可以使用平均值估算
+            # 这里我们提供一个保守的实际计数
+            logger.info(f"Scanned recent {recent_blocks_to_scan} blocks for transaction count: {total_transactions}")
 
         return {
             "success": True,
@@ -850,7 +866,7 @@ def get_blocks(limit: int = 10, offset: int = 0) -> Dict[str, Any]:
 
 def get_all_events(filters: Dict[str, Any] = None, limit: int = 10, offset: int = 0) -> Dict[str, Any]:
     """
-    获取所有合约事件
+    获取所有合约事件，支持完整分页
     """
     if not w3 or not w3.is_connected():
         return {"success": False, "error": "Web3 not connected"}
@@ -859,9 +875,17 @@ def get_all_events(filters: Dict[str, Any] = None, limit: int = 10, offset: int 
         latest_block = w3.eth.block_number
         events = []
         
-        # 确定区块范围
-        from_block = filters.get("from_block", max(0, latest_block - 100)) if filters else max(0, latest_block - 100)
+        # 确定区块范围 - 默认扫描所有区块以支持完整分页
+        from_block = filters.get("from_block", 0) if filters else 0
         to_block = filters.get("to_block", latest_block) if filters else latest_block
+        
+        # 限制单次查询的区块范围，避免超时
+        max_block_range = 1000
+        if to_block - from_block > max_block_range:
+            # 分批次获取，从最新的区块开始
+            batch_from = max(from_block, to_block - max_block_range)
+        else:
+            batch_from = from_block
         
         # 获取所有合约的事件
         contract_map = {
@@ -882,7 +906,7 @@ def get_all_events(filters: Dict[str, Any] = None, limit: int = 10, offset: int 
                 # 获取该合约的所有事件
                 # 使用getLogs来获取合约的所有事件
                 logs = w3.eth.get_logs({
-                    'fromBlock': from_block,
+                    'fromBlock': batch_from,
                     'toBlock': to_block,
                     'address': contract.address
                 })

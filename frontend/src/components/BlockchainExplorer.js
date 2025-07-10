@@ -99,6 +99,7 @@ const BlockchainExplorer = () => {
   const [transactions, setTransactions] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [events, setEvents] = useState([]);
+  const [eventsTotal, setEventsTotal] = useState(0);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -208,33 +209,47 @@ const BlockchainExplorer = () => {
       setBlocks(mockBlocksData.blocks || []);
     }
     
-    // 获取事件数据 (需要根据连接状态智能处理)
+  // 获取事件数据的独立函数（支持分页）
+  const fetchEvents = async (currentPage = 0, currentRowsPerPage = 10) => {
     try {
       const eventsResponse = await blockchainApi.getEvents({
-        limit: 10,
-        offset: 0
+        limit: currentRowsPerPage,
+        offset: currentPage * currentRowsPerPage
       });
       
       // 检查API响应
       if (eventsResponse.note && eventsResponse.note.includes("mock data")) {
         console.log("Backend returned mock events data");
         setEvents(eventsResponse.events || []);
-        hasErrors = true;
-      } else if (eventsResponse.events && eventsResponse.events.length > 0) {
+        setEventsTotal(eventsResponse.total || 0);
+        return true; // 表示有错误
+      } else if (eventsResponse.events) {
         // 真实的Ganache事件数据
         console.log("Using real Ganache events data");
         setEvents(eventsResponse.events);
+        setEventsTotal(eventsResponse.total || eventsResponse.events.length);
+        return false;
       } else {
         // 连接正常但没有事件数据，显示空状态
         console.log("No events found in blockchain - this is normal if no contract events have been triggered");
         setEvents([]);
+        setEventsTotal(0);
+        return false;
       }
     } catch (err) {
       console.error("Error fetching events:", err);
-      hasErrors = true;
       // API调用失败时使用mock数据
       const mockEventsData = blockchainApi.generateMockEvents();
       setEvents(mockEventsData.events || []);
+      setEventsTotal(mockEventsData.total || (mockEventsData.events || []).length);
+      return true; // 表示有错误
+    }
+  };
+
+    // 获取事件数据 (需要根据连接状态智能处理)
+    const eventsHasError = await fetchEvents(page, rowsPerPage);
+    if (eventsHasError) {
+      hasErrors = true;
     }
     
     // 只有在有错误时才显示错误信息
@@ -268,14 +283,27 @@ const BlockchainExplorer = () => {
   };
 
   // 处理页面变化
-  const handleChangePage = (event, newPage) => {
+  const handleChangePage = async (event, newPage) => {
     setPage(newPage);
+    // 如果当前在events标签页，需要重新获取数据
+    if (tabValue === 2) {
+      setLoading(true);
+      await fetchEvents(newPage, rowsPerPage);
+      setLoading(false);
+    }
   };
 
   // 处理每页行数变化
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
+  const handleChangeRowsPerPage = async (event) => {
+    const newRowsPerPage = parseInt(event.target.value, 10);
+    setRowsPerPage(newRowsPerPage);
     setPage(0);
+    // 如果当前在events标签页，需要重新获取数据
+    if (tabValue === 2) {
+      setLoading(true);
+      await fetchEvents(0, newRowsPerPage);
+      setLoading(false);
+    }
   };
 
   // 处理搜索
@@ -490,10 +518,10 @@ const BlockchainExplorer = () => {
             <TableHead>
               <TableRow>
                 <TableCell>Event Name</TableCell>
+                <TableCell>Contract</TableCell>
                 <TableCell>Block Number</TableCell>
                 <TableCell>Transaction Hash</TableCell>
                 <TableCell>Timestamp</TableCell>
-                <TableCell>Contract Address</TableCell>
                 <TableCell>Parameters</TableCell>
               </TableRow>
             </TableHead>
@@ -514,19 +542,24 @@ const BlockchainExplorer = () => {
                         variant="outlined" 
                       />
                     </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={event.contract_name || 'Unknown'} 
+                        size="small" 
+                        color="secondary" 
+                        variant="outlined" 
+                      />
+                    </TableCell>
                     <TableCell>{event.block_number}</TableCell>
                     <TableCell>
                       <ShortAddress address={event.tx_hash} />
                     </TableCell>
                     <TableCell>{formatTimestamp(event.timestamp)}</TableCell>
                     <TableCell>
-                      <ShortAddress address={event.contract_address} />
-                    </TableCell>
-                    <TableCell>
                       {Object.entries(event.parameters || event.data || {}).map(([key, value]) => (
                         <Chip 
                           key={key}
-                          label={`${key}: ${value}`} 
+                          label={`${key}: ${String(value).substring(0, 20)}${String(value).length > 20 ? '...' : ''}`} 
                           size="small" 
                           sx={{ m: 0.25 }}
                         />
@@ -544,6 +577,15 @@ const BlockchainExplorer = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          rowsPerPageOptions={[5, 10, 25, 50]}
+          component="div"
+          count={eventsTotal}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+        />
       </>
     );
   };
