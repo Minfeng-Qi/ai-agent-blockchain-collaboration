@@ -109,6 +109,43 @@ const BlockchainExplorer = () => {
   const [filterType, setFilterType] = useState('all');
   const navigate = useNavigate();
 
+  // 获取事件数据的独立函数（支持分页）
+  const fetchEvents = async (currentPage = 0, currentRowsPerPage = 10) => {
+    try {
+      const eventsResponse = await blockchainApi.getEvents({
+        limit: currentRowsPerPage,
+        offset: currentPage * currentRowsPerPage
+      });
+      
+      // 检查API响应
+      if (eventsResponse.note && eventsResponse.note.includes("mock data")) {
+        console.log("Backend returned mock events data");
+        setEvents(eventsResponse.events || []);
+        setEventsTotal(eventsResponse.total || 0);
+        return true; // 表示有错误
+      } else if (eventsResponse.events) {
+        // 真实的Ganache事件数据
+        console.log("Using real Ganache events data");
+        setEvents(eventsResponse.events);
+        setEventsTotal(eventsResponse.total || eventsResponse.events.length);
+        return false;
+      } else {
+        // 连接正常但没有事件数据，显示空状态
+        console.log("No events found in blockchain - this is normal if no contract events have been triggered");
+        setEvents([]);
+        setEventsTotal(0);
+        return false;
+      }
+    } catch (err) {
+      console.error("Error fetching events:", err);
+      // API调用失败时使用mock数据
+      const mockEventsData = blockchainApi.generateMockEvents();
+      setEvents(mockEventsData.events || []);
+      setEventsTotal(mockEventsData.total || (mockEventsData.events || []).length);
+      return true; // 表示有错误
+    }
+  };
+
   // 获取区块链数据
   const fetchBlockchainData = async () => {
     setLoading(true);
@@ -209,43 +246,6 @@ const BlockchainExplorer = () => {
       setBlocks(mockBlocksData.blocks || []);
     }
     
-  // 获取事件数据的独立函数（支持分页）
-  const fetchEvents = async (currentPage = 0, currentRowsPerPage = 10) => {
-    try {
-      const eventsResponse = await blockchainApi.getEvents({
-        limit: currentRowsPerPage,
-        offset: currentPage * currentRowsPerPage
-      });
-      
-      // 检查API响应
-      if (eventsResponse.note && eventsResponse.note.includes("mock data")) {
-        console.log("Backend returned mock events data");
-        setEvents(eventsResponse.events || []);
-        setEventsTotal(eventsResponse.total || 0);
-        return true; // 表示有错误
-      } else if (eventsResponse.events) {
-        // 真实的Ganache事件数据
-        console.log("Using real Ganache events data");
-        setEvents(eventsResponse.events);
-        setEventsTotal(eventsResponse.total || eventsResponse.events.length);
-        return false;
-      } else {
-        // 连接正常但没有事件数据，显示空状态
-        console.log("No events found in blockchain - this is normal if no contract events have been triggered");
-        setEvents([]);
-        setEventsTotal(0);
-        return false;
-      }
-    } catch (err) {
-      console.error("Error fetching events:", err);
-      // API调用失败时使用mock数据
-      const mockEventsData = blockchainApi.generateMockEvents();
-      setEvents(mockEventsData.events || []);
-      setEventsTotal(mockEventsData.total || (mockEventsData.events || []).length);
-      return true; // 表示有错误
-    }
-  };
-
     // 获取事件数据 (需要根据连接状态智能处理)
     const eventsHasError = await fetchEvents(page, rowsPerPage);
     if (eventsHasError) {
