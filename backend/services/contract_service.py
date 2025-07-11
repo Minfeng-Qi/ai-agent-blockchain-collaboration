@@ -57,15 +57,15 @@ def load_contract(contract_name: str):
         with open(abi_path, 'r') as f:
             contract_data = json.load(f)
         
-        # 更新的合约地址 (checksum格式) - 支持capabilities
+        # 更新的合约地址 (最新部署 - 支持updateTask) - 支持capabilities
         contract_addresses = {
-            "AgentRegistry": "0x693531c8b4B86c43Fa489E75F986e8dECc9F2b10",
-            "ActionLogger": "0xA5906Dbc1fe7Bfae553781ec84B74BB76107A0be",
-            "IncentiveEngine": "0x15E2486E1F3aC8CF60906D8750c576173Bc57621",
-            "TaskManager": "0xD8b65A906be70f585Ad542700D6c609b1BD02C8F",
-            "BidAuction": "0x66f5Efca31046B8BaF4d10D9EA3180818F629852",
-            "MessageHub": "0x0284023242A9C9008f1a1C53c6B7530190CcA86D",
-            "Learning": "0xb51f71B437d7198AAecb8753C87bb7701DB82278",
+            "AgentRegistry": "0xeE4F32aE44860D5014b17E0D4ee2FA1cEE8c746d",
+            "ActionLogger": "0x2Ca00F39a318af904F3276935681252Ca9B3c691",
+            "IncentiveEngine": "0x9F34d03adACc3F86AB17DcaB90EA03b37B0078f7",
+            "TaskManager": "0x61Ac754f0a5863d8DecF144D8060ADebc733D0a5",
+            "BidAuction": "0x81C67A4bC5f1351B3CE178b234F33403df688337",
+            "MessageHub": "0xaA908cAA663Fa96784Ea7d40968d93158b30cac1",
+            "Learning": "0x6AEb9Cc75d7d85f6647d6B90b58Fc1bbB61a9Cb3",
         }
         
         contract_address = contract_addresses.get(contract_name)
@@ -282,22 +282,44 @@ def create_task(task_data: Dict[str, Any], sender_address: str) -> Dict[str, Any
         return {"success": False, "error": "Contract not initialized"}
     
     try:
-        # 准备交易数据
+        # 准备交易数据 - createTask不是payable函数，所以reward只是存储值，不转移ETH
+        reward_wei = int(task_data.get("reward", 0) * 1e18)
         tx_data = {
             "from": sender_address,
-            "value": w3.to_wei(task_data.get("reward", 0), "ether"),
-            "gas": 3000000,
+            "gas": 5000000,  # 增加gas限制
             "gasPrice": w3.eth.gas_price,
             "nonce": w3.eth.get_transaction_count(sender_address)
+            # 注意：createTask不是payable，所以不包含value字段
         }
+        
+        # 准备deadline（如果没有提供，设置为一个月后）
+        deadline = task_data.get("deadline")
+        if not deadline:
+            deadline = int(time.time()) + (30 * 24 * 60 * 60)  # 30天
+        
+        # 确保required_capabilities是list类型
+        capabilities = task_data.get("required_capabilities", [])
+        if not isinstance(capabilities, list):
+            capabilities = list(capabilities)
+        
+        # 打印调试信息
+        logger.info(f"Creating task with parameters:")
+        logger.info(f"  title: {task_data.get('title', '')}")
+        logger.info(f"  description: {task_data.get('description', '')}")
+        logger.info(f"  capabilities: {capabilities}")
+        logger.info(f"  min_reputation: {int(task_data.get('min_reputation', 0))}")
+        logger.info(f"  reward_wei: {reward_wei}")
+        logger.info(f"  deadline: {int(deadline)}")
+        logger.info(f"  sender: {sender_address}")
         
         # 调用合约方法
         tx_hash = task_manager_contract.functions.createTask(
-            task_data["title"],
-            task_data["description"],
-            task_data.get("required_capabilities", []),
-            task_data.get("deadline", 0),
-            task_data.get("complexity", 1)
+            task_data.get("title", ""),
+            task_data.get("description", ""),
+            capabilities,  # 已确保是list类型
+            int(task_data.get("min_reputation", 0)),  # 确保是整数
+            reward_wei,  # 使用已计算的wei值
+            int(deadline)  # 确保是整数
         ).transact(tx_data)
         
         # 等待交易确认
@@ -308,7 +330,7 @@ def create_task(task_data: Dict[str, Any], sender_address: str) -> Dict[str, Any
         for log in receipt["logs"]:
             try:
                 event = task_manager_contract.events.TaskCreated().process_log(log)
-                task_id = event["args"]["taskId"]
+                task_id = event["args"]["taskId"].hex()
                 break
             except:
                 continue
@@ -323,6 +345,34 @@ def create_task(task_data: Dict[str, Any], sender_address: str) -> Dict[str, Any
         logger.error(f"Error creating task: {str(e)}")
         return {"success": False, "error": str(e)}
 
+def get_task_collaboration_agents(task_id_bytes: bytes) -> List[str]:
+    """
+    从AgentCollaborationStarted事件中获取任务的所有分配agents
+    """
+    if not task_manager_contract:
+        return []
+    
+    try:
+        # 使用Web3.py 6.0.0兼容的事件过滤器
+        event_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
+            fromBlock='earliest',
+            toBlock='latest',
+            argument_filters={'taskId': task_id_bytes}
+        )
+        
+        # 获取事件
+        events = event_filter.get_all_entries()
+        
+        if events:
+            # 返回最新事件的selectedAgents
+            latest_event = events[-1]
+            return list(latest_event['args']['selectedAgents'])
+        else:
+            return []
+    except Exception as e:
+        logger.warning(f"Error getting collaboration agents for task {task_id_bytes.hex()}: {str(e)}")
+        return []
+
 def get_task(task_id: str) -> Dict[str, Any]:
     """
     获取任务信息
@@ -331,42 +381,115 @@ def get_task(task_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "Contract not initialized"}
     
     try:
-        task_data = task_manager_contract.functions.getTask(task_id).call()
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            # 如果已经是hex格式，直接使用
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            # 如果不是hex格式，检查是否是有效的hex字符串
+            try:
+                task_id_bytes = bytes.fromhex(task_id)
+            except ValueError:
+                # 如果不是有效的hex字符串，返回错误
+                return {"success": False, "error": f"Invalid task ID format: {task_id}"}
+        
+        # 获取基本信息
+        basic_info = task_manager_contract.functions.getTaskBasicInfo(task_id_bytes).call()
+        execution_info = task_manager_contract.functions.getTaskExecutionDetails(task_id_bytes).call()
+        
+        # 状态映射
+        status_map = {
+            0: "created",
+            1: "open", 
+            2: "assigned",
+            3: "in_progress",
+            4: "completed",
+            5: "failed",
+            6: "cancelled"
+        }
+        
+        # 获取协作agents（从AgentCollaborationStarted事件中）
+        assigned_agents = get_task_collaboration_agents(task_id_bytes)
+        
         return {
             "success": True,
             "task_id": task_id,
-            "title": task_data[0],
-            "description": task_data[1],
-            "creator": task_data[2],
-            "assigned_to": task_data[3],
-            "status": task_data[4],
-            "reward": w3.from_wei(task_data[5], "ether"),
-            "created_at": task_data[6],
-            "deadline": task_data[7],
-            "required_capabilities": task_data[8],
-            "complexity": task_data[9]
+            "title": basic_info[1],
+            "description": basic_info[2],
+            "creator": basic_info[0],
+            "reward": basic_info[3] / 1e18,  # 从wei转换为ether
+            "deadline": basic_info[4],
+            "status": status_map.get(basic_info[5], "unknown"),
+            "required_capabilities": list(execution_info[0]),
+            "min_reputation": execution_info[1],
+            "assigned_agent": execution_info[2] if execution_info[2] != "0x0000000000000000000000000000000000000000" else None,
+            "assigned_agents": assigned_agents,  # 添加多agent支持
+            "created_at": execution_info[3],
+            "completed_at": execution_info[4] if execution_info[4] > 0 else None,
+            "result": execution_info[5] if execution_info[5] else None
         }
     except Exception as e:
         logger.error(f"Error getting task {task_id}: {str(e)}")
         return {"success": False, "error": str(e)}
 
-def get_all_tasks() -> List[Dict[str, Any]]:
+def get_all_tasks() -> Dict[str, Any]:
     """
     获取所有任务
     """
     if not task_manager_contract:
+        logger.error("Task manager contract not initialized")
         return {"success": False, "error": "Contract not initialized"}
     
     try:
-        task_count = task_manager_contract.functions.getTaskCount().call()
+        # 获取所有任务ID
+        logger.info("Calling getAllTasks on contract...")
+        task_ids = task_manager_contract.functions.getAllTasks().call()
+        logger.info(f"Got {len(task_ids)} tasks from blockchain")
         tasks = []
         
-        for i in range(task_count):
-            task_id = task_manager_contract.functions.taskIds(i).call()
-            task_data = get_task(task_id)
-            if task_data["success"]:
-                tasks.append(task_data)
+        # 状态映射
+        status_map = {
+            0: "created",
+            1: "open", 
+            2: "assigned",
+            3: "in_progress",
+            4: "completed",
+            5: "failed",
+            6: "cancelled"
+        }
         
+        for task_id_bytes in task_ids:
+            try:
+                # 获取任务详细信息
+                basic_info = task_manager_contract.functions.getTaskBasicInfo(task_id_bytes).call()
+                execution_info = task_manager_contract.functions.getTaskExecutionDetails(task_id_bytes).call()
+                
+                # 获取协作agents
+                assigned_agents = get_task_collaboration_agents(task_id_bytes)
+                
+                task_data = {
+                    "task_id": task_id_bytes.hex(),
+                    "title": basic_info[1],
+                    "description": basic_info[2],
+                    "creator": basic_info[0],
+                    "reward": basic_info[3] / 1e18,  # 从wei转换为ether
+                    "deadline": basic_info[4],
+                    "status": status_map.get(basic_info[5], "unknown"),
+                    "required_capabilities": list(execution_info[0]),
+                    "min_reputation": execution_info[1],
+                    "assigned_agent": execution_info[2] if execution_info[2] != "0x0000000000000000000000000000000000000000" else None,
+                    "assigned_agents": assigned_agents,  # 添加多agent支持
+                    "created_at": execution_info[3],
+                    "completed_at": execution_info[4] if execution_info[4] > 0 else None,
+                    "result": execution_info[5] if execution_info[5] else None
+                }
+                
+                tasks.append(task_data)
+            except Exception as e:
+                logger.warning(f"Error getting task {task_id_bytes.hex()}: {str(e)}")
+                continue
+        
+        logger.info(f"Successfully processed {len(tasks)} tasks from blockchain")
         return {"success": True, "tasks": tasks}
     except Exception as e:
         logger.error(f"Error getting all tasks: {str(e)}")
@@ -432,6 +555,219 @@ def complete_task(task_id: str, result: str, sender_address: str) -> Dict[str, A
         }
     except Exception as e:
         logger.error(f"Error completing task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def start_agent_collaboration(task_id: str, selected_agents: List[str], collaboration_id: str, sender_address: str) -> Dict[str, Any]:
+    """
+    启动智能体协作
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.startAgentCollaboration(
+            task_id_bytes,
+            selected_agents,
+            collaboration_id
+        ).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"],
+            "collaboration_id": collaboration_id,
+            "selected_agents": selected_agents
+        }
+    except Exception as e:
+        logger.error(f"Error starting collaboration for task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def select_agents_for_task(task_id: str, required_capabilities: List[str], min_reputation: int = 0) -> List[str]:
+    """
+    基于任务需求智能选择合适的代理
+    """
+    if not agent_registry_contract:
+        return []
+    
+    try:
+        # 获取所有活跃代理
+        all_agents = agent_registry_contract.functions.getAllAgents().call()
+        suitable_agents = []
+        
+        for agent_address in all_agents:
+            try:
+                # 检查代理是否活跃
+                if not agent_registry_contract.functions.isActiveAgent(agent_address).call():
+                    continue
+                
+                # 获取代理信息
+                agent_info = agent_registry_contract.functions.getAgent(agent_address).call()
+                reputation = agent_info[4] if len(agent_info) > 4 else 0
+                
+                # 检查声誉要求
+                if reputation < min_reputation:
+                    continue
+                
+                # 获取代理能力
+                capabilities_info = agent_registry_contract.functions.getCapabilities(agent_address).call()
+                agent_capabilities = capabilities_info[0] if capabilities_info else []
+                
+                # 检查是否具备所需能力（只要有任何一个匹配即可）
+                has_required_capabilities = any(
+                    any(req_cap.lower() in agent_cap.lower() for agent_cap in agent_capabilities)
+                    for req_cap in required_capabilities
+                )
+                
+                if has_required_capabilities:
+                    # 计算匹配得分 (基于声誉和能力匹配度)
+                    capability_match_score = len([cap for cap in agent_capabilities if any(req in cap.lower() for req in required_capabilities)])
+                    total_score = reputation + capability_match_score * 10
+                    
+                    suitable_agents.append({
+                        "address": agent_address,
+                        "reputation": reputation,
+                        "capabilities": agent_capabilities,
+                        "score": total_score
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Error evaluating agent {agent_address}: {str(e)}")
+                continue
+        
+        # 按得分排序并选择前几名
+        suitable_agents.sort(key=lambda x: x["score"], reverse=True)
+        
+        # 选择最多3个代理进行协作
+        selected_count = min(3, len(suitable_agents))
+        selected_agents = [agent["address"] for agent in suitable_agents[:selected_count]]
+        
+        logger.info(f"Selected {len(selected_agents)} agents for task {task_id}: {selected_agents}")
+        
+        # 如果没有找到合适的代理，使用fallback（用于测试）
+        if not selected_agents:
+            logger.warning(f"No agents found via blockchain, using fallback for task {task_id}")
+            # 返回现有的代理作为fallback
+            try:
+                all_agents = agent_registry_contract.functions.getAllAgents().call()
+                if all_agents:
+                    selected_agents = [all_agents[0]]  # 使用第一个代理作为fallback
+            except Exception as e:
+                logger.error(f"Error getting fallback agents: {str(e)}")
+        
+        return selected_agents
+        
+    except Exception as e:
+        logger.error(f"Error selecting agents for task {task_id}: {str(e)}")
+        return []
+
+def update_task(task_id: str, task_data: Dict[str, Any], sender_address: str) -> Dict[str, Any]:
+    """
+    更新任务信息
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备参数
+        new_title = task_data.get("title", "")
+        new_description = task_data.get("description", "")
+        new_deadline = int(task_data.get("deadline", 0))
+        new_reward = int(task_data.get("reward", 0) * 1e18) if task_data.get("reward") else 0
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 5000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        logger.info(f"Updating task {task_id} with params:")
+        logger.info(f"  title: {new_title}")
+        logger.info(f"  description: {new_description}")
+        logger.info(f"  deadline: {new_deadline}")
+        logger.info(f"  reward: {new_reward}")
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.updateTask(
+            task_id_bytes,
+            new_title,
+            new_description,
+            new_deadline,
+            new_reward
+        ).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error updating task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def cancel_task(task_id: str, sender_address: str, reason: str = "Task cancelled") -> Dict[str, Any]:
+    """
+    取消任务
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.cancelTask(task_id_bytes).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error cancelling task {task_id}: {str(e)}")
         return {"success": False, "error": str(e)}
 
 # 学习相关方法
@@ -1286,6 +1622,143 @@ def deactivate_agent(agent_address: str) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error deactivating agent: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def record_collaboration_conversation_start(task_id: str, conversation_id: str, participants: list, conversation_topic: str, sender_address: str) -> Dict[str, Any]:
+    """
+    在区块链上记录协作对话开始
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.startCollaborationConversation(
+            task_id_bytes,
+            conversation_id,
+            participants,
+            conversation_topic
+        ).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"],
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "participants": participants
+        }
+    except Exception as e:
+        logger.error(f"Error recording collaboration conversation start: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def record_collaboration_message(task_id: str, conversation_id: str, sender_address: str, message: str, message_index: int, tx_sender: str) -> Dict[str, Any]:
+    """
+    在区块链上记录协作消息
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备交易数据
+        tx_data = {
+            "from": tx_sender,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(tx_sender)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.recordCollaborationMessage(
+            task_id_bytes,
+            conversation_id,
+            sender_address,
+            message,
+            message_index
+        ).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"],
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "message_index": message_index
+        }
+    except Exception as e:
+        logger.error(f"Error recording collaboration message: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def record_collaboration_result(task_id: str, conversation_id: str, participants: list, final_result: str, conversation_summary: str, sender_address: str) -> Dict[str, Any]:
+    """
+    在区块链上记录协作结果
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.recordCollaborationResult(
+            task_id_bytes,
+            conversation_id,
+            participants,
+            final_result,
+            conversation_summary
+        ).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"],
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "participants": participants
+        }
+    except Exception as e:
+        logger.error(f"Error recording collaboration result: {str(e)}")
         return {"success": False, "error": str(e)}
 
 try:

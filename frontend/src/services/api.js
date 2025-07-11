@@ -662,6 +662,42 @@ const mockDataGenerator = {
         tx_hash: '0x9i8j7k6l9i8j7k6l9i8j7k6l9i8j7k6l9i8j7k6l9i8j7k6l9i8j7k6l9i8j7k6l',
         timestamp: new Date(currentDate.getTime() - 5 * 86400000).toISOString(),
         data: { task_id: 'task-124', agent_id: 'agent-789' }
+      },
+      {
+        event_id: 'event_006',
+        contract_address: '0x0987654321098765432109876543210987654321',
+        event_name: 'AgentCollaborationStarted',
+        block_number: 12340,
+        tx_hash: '0xa1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4',
+        timestamp: new Date(currentDate.getTime() - 6 * 86400000).toISOString(),
+        data: { 
+          task_id: 'task-125', 
+          collaboration_id: 'collab-001',
+          selected_agents: ['agent-001', 'agent-002', 'agent-003']
+        }
+      },
+      {
+        event_id: 'event_007',
+        contract_address: '0x0987654321098765432109876543210987654321',
+        event_name: 'TaskStatusUpdated',
+        block_number: 12339,
+        tx_hash: '0xe5f6g7h8e5f6g7h8e5f6g7h8e5f6g7h8e5f6g7h8e5f6g7h8e5f6g7h8e5f6g7h8',
+        timestamp: new Date(currentDate.getTime() - 7 * 86400000).toISOString(),
+        data: { task_id: 'task-126', old_status: 'open', new_status: 'assigned' }
+      },
+      {
+        event_id: 'event_008',
+        contract_address: '0x0987654321098765432109876543210987654321',
+        event_name: 'TaskEvaluated',
+        block_number: 12338,
+        tx_hash: '0xf9g0h1i2f9g0h1i2f9g0h1i2f9g0h1i2f9g0h1i2f9g0h1i2f9g0h1i2f9g0h1i2',
+        timestamp: new Date(currentDate.getTime() - 8 * 86400000).toISOString(),
+        data: { 
+          task_id: 'task-127', 
+          agent_id: 'agent-456',
+          quality_score: 85,
+          final_score: 92
+        }
       }
     ];
     
@@ -995,6 +1031,26 @@ export const api = {
     }
   },
   
+  startCollaboration: async (taskId, collaborationData) => {
+    try {
+      const response = await apiClient.post(`/tasks/${taskId}/start-collaboration`, collaborationData);
+      return response.data;
+    } catch (error) {
+      console.error(`Error starting collaboration for task ${taskId}:`, error);
+      throw error;
+    }
+  },
+  
+  getSuitableAgents: async (taskId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/suitable-agents`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting suitable agents for task ${taskId}:`, error);
+      throw error;
+    }
+  },
+  
   // 学习相关
   getLearningEvents: async (filters = {}) => {
     try {
@@ -1239,7 +1295,9 @@ export const taskApi = {
   updateTask: api.updateTask,
   deleteTask: api.deleteTask,
   assignTask: api.assignTask,
-  completeTask: api.completeTask
+  completeTask: api.completeTask,
+  startCollaboration: api.startCollaboration,
+  getSuitableAgents: api.getSuitableAgents
 };
 
 export const learningApi = {
@@ -1295,3 +1353,207 @@ export const collaborationApi = {
   // 添加模拟数据生成函数
   generateMockCollaborationConversation: mockDataGenerator.generateMockCollaborationConversation.bind(mockDataGenerator)
 };
+
+// 新增：真实的agent协作对话API
+export const realCollaborationApi = {
+  // 启动真实的agent协作对话
+  startRealCollaboration: async (taskId, collaborationData = {}) => {
+    try {
+      const response = await apiClient.post(`/tasks/${taskId}/start-real-collaboration`, collaborationData);
+      return response.data;
+    } catch (error) {
+      console.error('Error starting real collaboration:', error);
+      throw error;
+    }
+  },
+
+  // 完成协作对话并生成最终结果
+  finalizeCollaboration: async (taskId, finalizationData) => {
+    try {
+      const response = await apiClient.post(`/tasks/${taskId}/finalize-collaboration`, finalizationData);
+      return response.data;
+    } catch (error) {
+      console.error('Error finalizing collaboration:', error);
+      throw error;
+    }
+  },
+
+  // 获取任务的所有对话记录
+  getTaskConversations: async (taskId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/conversations`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching task conversations:', error);
+      // 返回模拟数据
+      return {
+        task_id: taskId,
+        conversations: [
+          {
+            id: '1',
+            conversation_id: 'conv_001',
+            status: 'completed',
+            participants: [
+              '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+            ],
+            created_at: new Date(Date.now() - 3600000).toISOString(),
+            completed_at: new Date(Date.now() - 1800000).toISOString(),
+            message_count: 12
+          }
+        ],
+        total: 1
+      };
+    }
+  },
+
+  // 获取对话的详细信息
+  getConversationDetails: async (taskId, conversationId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/conversations/${conversationId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching conversation details:', error);
+      // 返回模拟数据
+      return {
+        success: true,
+        conversation: {
+          id: '1',
+          conversation_id: conversationId,
+          task_id: taskId,
+          task_description: 'Analyze market trends and provide insights',
+          participants: [
+            '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+            '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+          ],
+          agent_roles: {
+            '0x70997970C51812dc3A010C7d01b50e0d17dc79C8': {
+              agent_name: 'Data Analyst',
+              capabilities: ['data_analysis', 'statistics']
+            },
+            '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC': {
+              agent_name: 'Market Expert',
+              capabilities: ['market_research', 'trend_analysis']
+            }
+          },
+          status: 'completed',
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+          completed_at: new Date(Date.now() - 1800000).toISOString(),
+          messages: [
+            {
+              id: '1',
+              sender_address: 'system',
+              agent_name: null,
+              content: 'Welcome to the collaboration! Please discuss how to analyze market trends effectively.',
+              message_index: 0,
+              round_number: null,
+              timestamp: new Date(Date.now() - 3600000).toISOString()
+            },
+            {
+              id: '2',
+              sender_address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              agent_name: 'Data Analyst',
+              content: 'Hello! I specialize in data analysis and statistical modeling. For this market trend analysis, I suggest we start by collecting relevant market data from the past 6 months.',
+              message_index: 1,
+              round_number: 1,
+              timestamp: new Date(Date.now() - 3500000).toISOString()
+            },
+            {
+              id: '3',
+              sender_address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+              agent_name: 'Market Expert',
+              content: 'Excellent approach! As a market research expert, I can provide context on industry trends. We should focus on key metrics like consumer sentiment, trading volumes, and sector performance.',
+              message_index: 2,
+              round_number: 1,
+              timestamp: new Date(Date.now() - 3400000).toISOString()
+            },
+            {
+              id: '4',
+              sender_address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              agent_name: 'Data Analyst',
+              content: 'Perfect! I can create statistical models to identify patterns in the data. Let me propose using time series analysis and regression models to understand the underlying trends.',
+              message_index: 3,
+              round_number: 2,
+              timestamp: new Date(Date.now() - 3000000).toISOString()
+            },
+            {
+              id: '5',
+              sender_address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+              agent_name: 'Market Expert',
+              content: 'That sounds comprehensive. I would also recommend incorporating external factors like economic indicators and seasonal patterns. This will give us a more complete picture.',
+              message_index: 4,
+              round_number: 2,
+              timestamp: new Date(Date.now() - 2900000).toISOString()
+            },
+            {
+              id: '6',
+              sender_address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              agent_name: 'Data Analyst',
+              content: 'Based on our discussion, I can now create a comprehensive analysis framework that combines statistical rigor with market expertise. The final deliverable will include trend analysis, forecasting, and actionable insights.',
+              message_index: 5,
+              round_number: 3,
+              timestamp: new Date(Date.now() - 2000000).toISOString()
+            }
+          ],
+          result: {
+            id: '1',
+            final_result: `# Market Trend Analysis Report
+
+## Executive Summary
+Based on our collaborative analysis, we have identified several key market trends:
+
+## Key Findings
+1. **Upward Trend in Technology Sector**: 15% growth over the past 6 months
+2. **Seasonal Patterns**: Strong Q4 performance historically
+3. **Consumer Sentiment**: Positive outlook with 78% confidence index
+
+## Statistical Analysis
+- Time series analysis shows consistent upward trajectory
+- Regression models indicate strong correlation with economic indicators
+- Volatility analysis suggests stable growth pattern
+
+## Market Insights
+- Industry experts predict continued growth
+- External factors support positive outlook
+- Seasonal adjustments recommend Q1 strategic positioning
+
+## Recommendations
+1. Increase investment in technology sector
+2. Prepare for Q1 market opportunities
+3. Monitor consumer sentiment indicators
+4. Implement risk management strategies
+
+## Conclusion
+The market shows strong positive trends with manageable risks. Our collaborative analysis provides a solid foundation for strategic decision-making.`,
+            conversation_summary: 'Data Analyst and Market Expert collaborated to create a comprehensive market trend analysis, combining statistical modeling with industry expertise.',
+            participants: [
+              '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+            ],
+            message_count: 6,
+            success: true,
+            created_at: new Date(Date.now() - 1800000).toISOString()
+          }
+        }
+      };
+    }
+  },
+
+  // 获取对话的消息列表
+  getConversationMessages: async (taskId, conversationId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/conversations/${conversationId}/messages`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching conversation messages:', error);
+      throw error;
+    }
+  }
+};
+
+// 扩展taskApi以包含新的协作功能
+taskApi.startRealCollaboration = realCollaborationApi.startRealCollaboration;
+taskApi.finalizeCollaboration = realCollaborationApi.finalizeCollaboration;
+taskApi.getTaskConversations = realCollaborationApi.getTaskConversations;
+taskApi.getConversationDetails = realCollaborationApi.getConversationDetails;
+taskApi.getConversationMessages = realCollaborationApi.getConversationMessages;

@@ -39,7 +39,8 @@ import {
   Delete as DeleteIcon,
   ArrowBack as ArrowBackIcon,
   Refresh as RefreshIcon,
-  Group as GroupIcon
+  Group as GroupIcon,
+  Chat as ChatIcon
 } from '@mui/icons-material';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { taskApi } from '../services/api';
@@ -50,13 +51,24 @@ const TaskDetails = () => {
   const [loading, setLoading] = useState(true);
   const [task, setTask] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   
   useEffect(() => {
     fetchTaskDetails();
   }, [taskId]);
+
+  // 当页面重新获得焦点时刷新数据（从其他页面返回时）
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchTaskDetails();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
   
   // 格式化时间戳
   const formatTimestamp = (timestamp) => {
@@ -141,26 +153,6 @@ const TaskDetails = () => {
     }
   };
   
-  const handleStartCollaboration = async () => {
-    setCollaborationLoading(true);
-    try {
-      const response = await taskApi.startCollaboration(taskId, {});
-      if (response.success) {
-        setError(`Collaboration started successfully! ID: ${response.collaboration_id}`);
-        setSnackbarOpen(true);
-        fetchTaskDetails(); // Refresh task data
-      } else {
-        setError('Failed to start collaboration: ' + response.error);
-        setSnackbarOpen(true);
-      }
-    } catch (error) {
-      console.error('Error starting collaboration:', error);
-      setError('Failed to start collaboration');
-      setSnackbarOpen(true);
-    } finally {
-      setCollaborationLoading(false);
-    }
-  };
   
   const getTaskStatusStep = (status) => {
     switch (status) {
@@ -248,24 +240,16 @@ const TaskDetails = () => {
           >
             Refresh
           </Button>
-          {task.status === 'open' && (
+          {task.status === 'completed' && (
             <Button 
-              variant="contained" 
-              color="primary"
-              onClick={handleStartCollaboration}
-              disabled={collaborationLoading}
-              startIcon={collaborationLoading ? <CircularProgress size={20} /> : null}
+              variant="outlined" 
+              color="info"
+              onClick={() => navigate(`/tasks/${taskId}/conversations`)}
+              startIcon={<ChatIcon />}
             >
-              {collaborationLoading ? 'Starting...' : 'Start Agent Collaboration'}
+              View AI Conversations
             </Button>
           )}
-          <Button 
-            variant="outlined" 
-            startIcon={<EditIcon />}
-            onClick={() => navigate(`/tasks/${taskId}/edit`)}
-          >
-            Edit
-          </Button>
           <Button 
             variant="outlined" 
             color="error"
@@ -356,34 +340,71 @@ const TaskDetails = () => {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <List>
-                  {task.assigned_agent && (
+                  {(task.assigned_agents?.length > 0 || task.assigned_agent) && (
                     <ListItem sx={{ pb: 2 }}>
                       <ListItemIcon>
                         <PersonIcon />
                       </ListItemIcon>
                       <ListItemText 
-                        primary="Assigned To" 
+                        primary={task.assigned_agents?.length > 1 ? "Assigned Agents" : "Assigned To"} 
                         secondary={
-                          <Box 
-                            sx={{ 
-                              display: 'flex', 
-                              alignItems: 'center',
-                              cursor: 'pointer',
-                              mt: 0.5
-                            }}
-                            onClick={() => navigate(`/agents/${task.assigned_agent}`)}
-                          >
-                            <Avatar 
-                              sx={{ 
-                                width: 24, 
-                                height: 24, 
-                                mr: 1, 
-                                bgcolor: generateAvatarColor(task.assigned_agent) 
-                              }}
-                            >
-                              {task.assigned_agent.substring(2, 4)}
-                            </Avatar>
-                            {formatAddress(task.assigned_agent)}
+                          <Box sx={{ mt: 0.5 }}>
+                            {task.assigned_agents?.length > 0 ? (
+                              task.assigned_agents.map((agent, index) => (
+                                <Box 
+                                  key={agent}
+                                  sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center',
+                                    cursor: 'pointer',
+                                    mb: index < task.assigned_agents.length - 1 ? 1 : 0
+                                  }}
+                                  onClick={() => navigate(`/agents/${agent}`)}
+                                >
+                                  <Avatar 
+                                    sx={{ 
+                                      width: 24, 
+                                      height: 24, 
+                                      mr: 1, 
+                                      bgcolor: generateAvatarColor(agent) 
+                                    }}
+                                  >
+                                    {agent.substring(2, 4)}
+                                  </Avatar>
+                                  {formatAddress(agent)}
+                                  {index === 0 && task.assigned_agents.length > 1 && (
+                                    <Chip 
+                                      label="Primary" 
+                                      size="small" 
+                                      sx={{ ml: 1, fontSize: '0.7rem' }}
+                                    />
+                                  )}
+                                </Box>
+                              ))
+                            ) : (
+                              task.assigned_agent && (
+                                <Box 
+                                  sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center',
+                                    cursor: 'pointer'
+                                  }}
+                                  onClick={() => navigate(`/agents/${task.assigned_agent}`)}
+                                >
+                                  <Avatar 
+                                    sx={{ 
+                                      width: 24, 
+                                      height: 24, 
+                                      mr: 1, 
+                                      bgcolor: generateAvatarColor(task.assigned_agent) 
+                                    }}
+                                  >
+                                    {task.assigned_agent.substring(2, 4)}
+                                  </Avatar>
+                                  {formatAddress(task.assigned_agent)}
+                                </Box>
+                              )
+                            )}
                           </Box>
                         } 
                       />
@@ -484,11 +505,15 @@ const TaskDetails = () => {
         </Grid>
         
         <Grid item xs={12} md={4}>
+          {/* Status-specific Information Panel */}
           <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              {task.status === 'open' ? 'Required Capabilities' : 'Assigned Agents'}
+              {task.status === 'open' && 'Required Capabilities'}
+              {task.status === 'assigned' && 'Assigned Agents'}
+              {task.status === 'completed' && 'Task Results'}
             </Typography>
-            {task.status === 'open' ? (
+            
+            {task.status === 'open' && (
               <Box>
                 <Typography variant="body2" color="textSecondary" gutterBottom>
                   Agents with these capabilities will be automatically selected:
@@ -505,41 +530,167 @@ const TaskDetails = () => {
                   ))}
                 </Box>
               </Box>
-            ) : task.assigned_agent ? (
-              <List>
-                <ListItem>
-                  <ListItemIcon>
-                    <Avatar 
-                      sx={{ 
-                        bgcolor: generateAvatarColor(task.assigned_agent) 
-                      }}
-                    >
-                      {task.assigned_agent.substring(2, 4)}
-                    </Avatar>
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={
-                      <Box 
-                        sx={{ 
-                          display: 'flex', 
-                          alignItems: 'center',
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => navigate(`/agents/${task.assigned_agent}`)}
-                      >
-                        {formatAddress(task.assigned_agent)}
-                      </Box>
-                    }
-                    secondary="Primary assigned agent"
-                  />
-                </ListItem>
-              </List>
-            ) : (
+            )}
+            
+            {task.status === 'assigned' && (task.assigned_agents?.length > 0 || task.assigned_agent) && (
+              <Box>
+                <List>
+                  {task.assigned_agents?.length > 0 ? (
+                    task.assigned_agents.map((agent, index) => (
+                      <ListItem key={agent}>
+                        <ListItemIcon>
+                          <Avatar 
+                            sx={{ 
+                              bgcolor: generateAvatarColor(agent) 
+                            }}
+                          >
+                            {agent.substring(2, 4)}
+                          </Avatar>
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={
+                            <Box 
+                              sx={{ 
+                                display: 'flex', 
+                                alignItems: 'center',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => navigate(`/agents/${agent}`)}
+                            >
+                              {formatAddress(agent)}
+                              {index === 0 && (
+                                <Chip 
+                                  label="Primary" 
+                                  size="small" 
+                                  sx={{ ml: 1, fontSize: '0.7rem' }}
+                                />
+                              )}
+                            </Box>
+                          }
+                          secondary={index === 0 ? "Primary assigned agent" : "Collaborating agent"}
+                        />
+                      </ListItem>
+                    ))
+                  ) : (
+                    task.assigned_agent && (
+                      <ListItem>
+                        <ListItemIcon>
+                          <Avatar 
+                            sx={{ 
+                              bgcolor: generateAvatarColor(task.assigned_agent) 
+                            }}
+                          >
+                            {task.assigned_agent.substring(2, 4)}
+                          </Avatar>
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={
+                            <Box 
+                              sx={{ 
+                                display: 'flex', 
+                                alignItems: 'center',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => navigate(`/agents/${task.assigned_agent}`)}
+                            >
+                              {formatAddress(task.assigned_agent)}
+                            </Box>
+                          }
+                          secondary="Primary assigned agent"
+                        />
+                      </ListItem>
+                    )
+                  )}
+                </List>
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                  {task.assigned_agents?.length > 1 ? 
+                    `${task.assigned_agents.length} agents collaborating on this task` : 
+                    'Ready to start AI conversation collaboration'
+                  }
+                </Typography>
+              </Box>
+            )}
+            
+            {task.status === 'completed' && (
+              <Box>
+                {(task.assigned_agents?.length > 0 || task.assigned_agent) && (
+                  <List>
+                    {task.assigned_agents?.length > 0 ? (
+                      task.assigned_agents.map((agent, index) => (
+                        <ListItem key={agent}>
+                          <ListItemIcon>
+                            <Avatar 
+                              sx={{ 
+                                bgcolor: generateAvatarColor(agent) 
+                              }}
+                            >
+                              {agent.substring(2, 4)}
+                            </Avatar>
+                          </ListItemIcon>
+                          <ListItemText 
+                            primary={formatAddress(agent)}
+                            secondary={index === 0 ? "Primary agent - Completed" : "Collaborating agent - Completed"}
+                          />
+                        </ListItem>
+                      ))
+                    ) : (
+                      task.assigned_agent && (
+                        <ListItem>
+                          <ListItemIcon>
+                            <Avatar 
+                              sx={{ 
+                                bgcolor: generateAvatarColor(task.assigned_agent) 
+                              }}
+                            >
+                              {task.assigned_agent.substring(2, 4)}
+                            </Avatar>
+                          </ListItemIcon>
+                          <ListItemText 
+                            primary={formatAddress(task.assigned_agent)}
+                            secondary="Completed by agent"
+                          />
+                        </ListItem>
+                      )
+                    )}
+                  </List>
+                )}
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                  Task completed successfully. View AI conversations to see collaboration details.
+                </Typography>
+              </Box>
+            )}
+            
+            {!task.assigned_agent && (!task.assigned_agents || task.assigned_agents.length === 0) && task.status !== 'open' && (
               <Typography variant="body2" color="textSecondary">
                 No agents assigned yet
               </Typography>
             )}
           </Paper>
+          
+          {task.status === 'open' && (
+            <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Task Actions
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={() => navigate(`/tasks/${taskId}/start-collaboration`)}
+                  startIcon={<GroupIcon />}
+                >
+                  Start Agent Collaboration
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  startIcon={<EditIcon />}
+                  onClick={() => navigate(`/tasks/${taskId}/edit`)}
+                >
+                  Edit Task
+                </Button>
+              </Box>
+            </Paper>
+          )}
           
           {task.status === 'assigned' && (
             <Paper variant="outlined" sx={{ p: 3 }}>
@@ -548,13 +699,23 @@ const TaskDetails = () => {
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Button 
-                  component={Link}
-                  to={`/tasks/${taskId}/collaborate`}
                   color="primary"
                   variant="contained"
-                  startIcon={<GroupIcon />}
+                  startIcon={<ChatIcon />}
+                  onClick={async () => {
+                    try {
+                      const response = await taskApi.startRealCollaboration(taskId);
+                      if (response.success) {
+                        navigate(`/tasks/${taskId}/conversations/${response.conversation_id}`);
+                      }
+                    } catch (error) {
+                      console.error('Error starting real collaboration:', error);
+                      setError('Failed to start AI collaboration');
+                      setSnackbarOpen(true);
+                    }
+                  }}
                 >
-                  Start Agent Collaboration
+                  View AI Conversations
                 </Button>
                 <Button 
                   variant="contained" 
