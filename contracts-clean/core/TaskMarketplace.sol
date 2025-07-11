@@ -42,21 +42,24 @@ contract TaskMarketplace is Ownable {
     
     /**
      * @dev Create a new task
-     * @param metadataURI IPFS URI for task details
+     * @param title Task title
+     * @param description Task description
      * @param capabilities Required capabilities
      * @param minReputation Minimum reputation required
      * @param reward Reward amount in tokens
      * @param deadline Deadline timestamp
      */
     function createTask(
-        string memory metadataURI,
+        string memory title,
+        string memory description,
         string[] memory capabilities,
         uint256 minReputation,
         uint256 reward,
         uint256 deadline
     ) external returns (uint256) {
         bytes32 taskId = taskManager.createTask(
-            metadataURI,
+            title,
+            description,
             capabilities,
             minReputation,
             reward,

@@ -189,8 +189,8 @@ const AgentDetails = () => {
                 response.registration_date) : 
               Math.floor(Date.now() / 1000),
               
-            // 生成模拟任务数据如果不存在
-            recent_tasks: response.recent_tasks || generateMockRecentTasks(response.agent_id),
+            // 使用真实的任务数据，不再生成mock数据
+            recent_tasks: response.recent_tasks || [],
             learning_events: response.learning_events || generateMockLearningEvents(response.agent_id),
             task_types: response.task_types || generateMockTaskTypes(response.capabilities),
             
@@ -231,8 +231,8 @@ const AgentDetails = () => {
             agentType: response.agentType,
             owner: response.owner,
             
-            // 添加模拟任务数据
-            recent_tasks: generateMockRecentTasks(response.agent_id),
+            // 使用真实的任务数据，不再生成mock数据
+            recent_tasks: response.recent_tasks || [],
             task_types: generateMockTaskTypes(response.capabilities),
             
             // 为图表生成一些模拟历史数据
@@ -924,8 +924,19 @@ const AgentDetails = () => {
                         {task.status === 'failed' && <ErrorIcon color="error" />}
                       </ListItemIcon>
                       <ListItemText 
-                        primary={task.description}
-                        secondary={`Score: ${task.score || 'N/A'} • Reward: ${task.reward}`}
+                        primary={task.title || task.description}
+                        secondary={
+                          <Box>
+                            <Typography variant="body2" color="textSecondary">
+                              {task.description && task.title ? task.description : ''}
+                            </Typography>
+                            <Typography variant="caption">
+                              Reward: {task.reward} ETH
+                              {task.score && ` • Score: ${task.score}`}
+                              {task.is_collaboration && ` • ${task.role === 'primary' ? 'Lead Agent' : 'Collaborator'} in team`}
+                            </Typography>
+                          </Box>
+                        }
                       />
                       <Chip 
                         label={task.status.charAt(0).toUpperCase() + task.status.slice(1)} 
@@ -1099,11 +1110,11 @@ const AgentDetails = () => {
                   <TableHead>
                     <TableRow>
                       <TableCell>Task ID</TableCell>
-                      <TableCell>Description</TableCell>
+                      <TableCell>Title</TableCell>
                       <TableCell>Status</TableCell>
-                      <TableCell>Score</TableCell>
+                      <TableCell>Role</TableCell>
                       <TableCell>Reward</TableCell>
-                      <TableCell>Completed</TableCell>
+                      <TableCell>Created</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1114,8 +1125,21 @@ const AgentDetails = () => {
                         onClick={() => navigate(`/tasks/${task.task_id}`)}
                         sx={{ cursor: 'pointer' }}
                       >
-                        <TableCell>{task.task_id}</TableCell>
-                        <TableCell>{task.description}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                            {task.task_id.substring(0, 8)}...
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {task.title || task.description}
+                          </Typography>
+                          {task.description && task.title && (
+                            <Typography variant="caption" color="textSecondary">
+                              {task.description.substring(0, 50)}...
+                            </Typography>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Chip 
                             label={task.status.charAt(0).toUpperCase() + task.status.slice(1)} 
@@ -1126,11 +1150,22 @@ const AgentDetails = () => {
                             }
                           />
                         </TableCell>
-                        <TableCell>{task.score || 'N/A'}</TableCell>
-                        <TableCell>{task.reward}</TableCell>
                         <TableCell>
-                          {task.completed_at 
-                            ? new Date(task.completed_at * 1000).toLocaleString() 
+                          {task.is_collaboration ? (
+                            <Chip 
+                              label={task.role === 'primary' ? 'Lead Agent' : 'Collaborator'}
+                              size="small"
+                              variant="outlined"
+                              color={task.role === 'primary' ? 'primary' : 'secondary'}
+                            />
+                          ) : (
+                            <Typography variant="body2" color="textSecondary">Solo</Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>{task.reward} ETH</TableCell>
+                        <TableCell>
+                          {task.created_at 
+                            ? new Date(task.created_at).toLocaleDateString() 
                             : 'N/A'
                           }
                         </TableCell>

@@ -22,7 +22,8 @@ contract TaskManager is Ownable {
     struct Task {
         bytes32 taskId;
         address creator;
-        string metadataURI;  // IPFS URI for task details
+        string title;  // Task title
+        string description;  // Task description
         string[] capabilities;  // Required capabilities
         uint256 minReputation;  // Minimum reputation required
         uint256 reward;  // Reward amount in tokens
@@ -32,7 +33,7 @@ contract TaskManager is Ownable {
         uint256 createdAt;
         uint256 assignedAt;
         uint256 completedAt;
-        string resultURI;  // IPFS URI for task result
+        string result;  // Task result
         bool isEvaluated;  // Whether the task has been evaluated
     }
     
@@ -49,7 +50,8 @@ contract TaskManager is Ownable {
     event TaskCreated(
         bytes32 indexed taskId,
         address indexed creator,
-        string metadataURI,
+        string title,
+        string description,
         string[] capabilities,
         uint256 minReputation,
         uint256 reward,
@@ -72,7 +74,7 @@ contract TaskManager is Ownable {
     event TaskCompleted(
         bytes32 indexed taskId,
         address indexed agent,
-        string resultURI,
+        string result,
         uint256 timestamp
     );
     
@@ -90,6 +92,62 @@ contract TaskManager is Ownable {
         uint256 qualityScore,
         uint256 delayRatio,
         uint256 finalScore,
+        uint256 timestamp
+    );
+    
+    // New event for agent collaboration start
+    event AgentCollaborationStarted(
+        bytes32 indexed taskId,
+        address indexed creator,
+        address[] selectedAgents,
+        string collaborationId,
+        uint256 timestamp
+    );
+    
+    // Event for task cancelled
+    event TaskCancelled(
+        bytes32 indexed taskId,
+        address indexed actor,
+        string reason,
+        uint256 timestamp
+    );
+    
+    // Event for task updated
+    event TaskUpdated(
+        bytes32 indexed taskId,
+        address indexed updater,
+        string field,
+        string oldValue,
+        string newValue,
+        uint256 timestamp
+    );
+    
+    // Event for collaboration conversation start
+    event CollaborationConversationStarted(
+        bytes32 indexed taskId,
+        string indexed conversationId,
+        address[] participants,
+        string conversationTopic,
+        uint256 timestamp
+    );
+    
+    // Event for collaboration message
+    event CollaborationMessage(
+        bytes32 indexed taskId,
+        string indexed conversationId,
+        address indexed sender,
+        string message,
+        uint256 messageIndex,
+        uint256 timestamp
+    );
+    
+    // Event for collaboration result
+    event CollaborationResult(
+        bytes32 indexed taskId,
+        string indexed conversationId,
+        address[] participants,
+        string result,
+        string conversationSummary,
         uint256 timestamp
     );
 
@@ -119,7 +177,8 @@ contract TaskManager is Ownable {
     
     /**
      * @dev Create a new task
-     * @param metadataURI IPFS URI for task details
+     * @param title Task title
+     * @param description Task description
      * @param capabilities Required capabilities
      * @param minReputation Minimum reputation required
      * @param reward Reward amount in tokens
@@ -127,19 +186,23 @@ contract TaskManager is Ownable {
      * @return Task ID
      */
     function createTask(
-        string memory metadataURI,
+        string memory title,
+        string memory description,
         string[] memory capabilities,
         uint256 minReputation,
         uint256 reward,
         uint256 deadline
     ) external returns (bytes32) {
+        require(bytes(title).length > 0, "Title cannot be empty");
+        require(bytes(description).length > 0, "Description cannot be empty");
         require(capabilities.length > 0, "At least one capability required");
         require(deadline > block.timestamp, "Deadline must be in the future");
         
         // Generate task ID
         bytes32 taskId = keccak256(abi.encodePacked(
             msg.sender,
-            metadataURI,
+            title,
+            description,
             block.timestamp,
             taskIds.length
         ));
@@ -148,17 +211,18 @@ contract TaskManager is Ownable {
         tasks[taskId] = Task({
             taskId: taskId,
             creator: msg.sender,
-            metadataURI: metadataURI,
+            title: title,
+            description: description,
             capabilities: capabilities,
             minReputation: minReputation,
             reward: reward,
             deadline: deadline,
-            status: TaskStatus.Created,
+            status: TaskStatus.Open,  // Directly set to Open
             assignedAgent: address(0),
             createdAt: block.timestamp,
             assignedAt: 0,
             completedAt: 0,
-            resultURI: "",
+            result: "",
             isEvaluated: false
         });
         
@@ -169,7 +233,8 @@ contract TaskManager is Ownable {
         emit TaskCreated(
             taskId,
             msg.sender,
-            metadataURI,
+            title,
+            description,
             capabilities,
             minReputation,
             reward,
@@ -206,7 +271,8 @@ contract TaskManager is Ownable {
      * @param agent Address of the agent to assign
      */
     function assignTask(bytes32 taskId, address agent) external {
-        require(address(bidAuction) == msg.sender, "Only BidAuction can assign tasks");
+        // Allow owner or BidAuction to assign tasks for intelligent assignment system
+        require(msg.sender == owner() || address(bidAuction) == msg.sender, "Only owner or BidAuction can assign tasks");
         
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Open, "Task not open for assignment");
@@ -248,9 +314,9 @@ contract TaskManager is Ownable {
     /**
      * @dev Complete a task
      * @param taskId ID of the task to complete
-     * @param resultURI IPFS URI for task result
+     * @param result Task result
      */
-    function completeTask(bytes32 taskId, string memory resultURI) external {
+    function completeTask(bytes32 taskId, string memory result) external {
         Task storage task = tasks[taskId];
         
         require(task.assignedAgent == msg.sender, "Not assigned to this agent");
@@ -258,10 +324,10 @@ contract TaskManager is Ownable {
         
         task.status = TaskStatus.Completed;
         task.completedAt = block.timestamp;
-        task.resultURI = resultURI;
+        task.result = result;
         
         // Emit events
-        emit TaskCompleted(taskId, msg.sender, resultURI, block.timestamp);
+        emit TaskCompleted(taskId, msg.sender, result, block.timestamp);
         emit TaskStatusUpdated(taskId, TaskStatus.Completed, msg.sender, block.timestamp);
     }
     
@@ -284,6 +350,124 @@ contract TaskManager is Ownable {
     }
     
     /**
+     * @dev Start agent collaboration for a task
+     * @param taskId ID of the task to start collaboration for
+     * @param selectedAgents Array of selected agent addresses
+     * @param collaborationId Unique collaboration identifier
+     */
+    function startAgentCollaboration(
+        bytes32 taskId, 
+        address[] memory selectedAgents,
+        string memory collaborationId
+    ) external {
+        Task storage task = tasks[taskId];
+        
+        require(task.creator == msg.sender || owner() == msg.sender, "Not authorized");
+        require(task.status == TaskStatus.Open, "Task not in Open state");
+        require(selectedAgents.length > 0, "At least one agent required");
+        require(bytes(collaborationId).length > 0, "Collaboration ID required");
+        
+        // Verify all selected agents are active and have required capabilities
+        for (uint256 i = 0; i < selectedAgents.length; i++) {
+            require(agentRegistry.isActiveAgent(selectedAgents[i]), "Agent not active");
+            // Additional capability verification could be added here
+        }
+        
+        // Update task status to assigned (first agent becomes primary assignee)
+        task.status = TaskStatus.Assigned;
+        task.assignedAgent = selectedAgents[0]; // Primary agent
+        task.assignedAt = block.timestamp;
+        
+        // Emit collaboration event
+        emit AgentCollaborationStarted(
+            taskId,
+            msg.sender,
+            selectedAgents,
+            collaborationId,
+            block.timestamp
+        );
+        
+        // Emit standard assignment events
+        emit TaskAssigned(taskId, selectedAgents[0], block.timestamp);
+        emit TaskStatusUpdated(taskId, TaskStatus.Assigned, selectedAgents[0], block.timestamp);
+    }
+    
+    /**
+     * @dev Update task information (only creator)
+     * @param taskId ID of the task to update
+     * @param newTitle New title (empty string to keep current)
+     * @param newDescription New description (empty string to keep current)
+     * @param newDeadline New deadline (0 to keep current)
+     * @param newReward New reward amount (0 to keep current)
+     */
+    function updateTask(
+        bytes32 taskId,
+        string memory newTitle,
+        string memory newDescription,
+        uint256 newDeadline,
+        uint256 newReward
+    ) external {
+        Task storage task = tasks[taskId];
+        
+        require(task.creator == msg.sender, "Only creator can update task");
+        require(task.status == TaskStatus.Open || task.status == TaskStatus.Created, "Task cannot be updated in current state");
+        
+        // Update title if provided
+        if (bytes(newTitle).length > 0 && keccak256(bytes(task.title)) != keccak256(bytes(newTitle))) {
+            string memory oldTitle = task.title;
+            task.title = newTitle;
+            emit TaskUpdated(taskId, msg.sender, "title", oldTitle, newTitle, block.timestamp);
+        }
+        
+        // Update description if provided
+        if (bytes(newDescription).length > 0 && keccak256(bytes(task.description)) != keccak256(bytes(newDescription))) {
+            string memory oldDescription = task.description;
+            task.description = newDescription;
+            emit TaskUpdated(taskId, msg.sender, "description", oldDescription, newDescription, block.timestamp);
+        }
+        
+        // Update deadline if provided and valid
+        if (newDeadline > 0 && newDeadline != task.deadline) {
+            require(newDeadline > block.timestamp, "New deadline must be in the future");
+            string memory oldDeadline = uint2str(task.deadline);
+            string memory newDeadlineStr = uint2str(newDeadline);
+            task.deadline = newDeadline;
+            emit TaskUpdated(taskId, msg.sender, "deadline", oldDeadline, newDeadlineStr, block.timestamp);
+        }
+        
+        // Update reward if provided
+        if (newReward > 0 && newReward != task.reward) {
+            string memory oldReward = uint2str(task.reward);
+            string memory newRewardStr = uint2str(newReward);
+            task.reward = newReward;
+            emit TaskUpdated(taskId, msg.sender, "reward", oldReward, newRewardStr, block.timestamp);
+        }
+    }
+    
+    /**
+     * @dev Convert uint to string (helper function)
+     */
+    function uint2str(uint256 _i) internal pure returns (string memory str) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint256 j = _i;
+        uint256 length;
+        while (j != 0) {
+            length++;
+            j /= 10;
+        }
+        bytes memory bstr = new bytes(length);
+        uint256 k = length;
+        j = _i;
+        while (j != 0) {
+            bstr[--k] = bytes1(uint8(48 + j % 10));
+            j /= 10;
+        }
+        str = string(bstr);
+    }
+
+    /**
      * @dev Cancel a task (only creator or owner)
      * @param taskId ID of the task to cancel
      */
@@ -296,7 +480,8 @@ contract TaskManager is Ownable {
         
         task.status = TaskStatus.Cancelled;
         
-        // Emit event
+        // Emit events
+        emit TaskCancelled(taskId, msg.sender, "Task cancelled by creator", block.timestamp);
         emit TaskStatusUpdated(taskId, TaskStatus.Cancelled, msg.sender, block.timestamp);
     }
     
@@ -481,5 +666,167 @@ contract TaskManager is Ownable {
      */
     function getTaskMinReputation(bytes32 taskId) external view returns (uint256) {
         return tasks[taskId].minReputation;
+    }
+    
+    /**
+     * @dev Get total number of tasks
+     * @return Total task count
+     */
+    function getTaskCount() external view returns (uint256) {
+        return taskIds.length;
+    }
+    
+    /**
+     * @dev Get basic task info
+     * @param taskId ID of the task
+     * @return creator Task creator address
+     * @return title Task title
+     * @return description Task description
+     * @return reward Task reward
+     * @return deadline Task deadline
+     * @return status Task status
+     */
+    function getTaskBasicInfo(bytes32 taskId) external view returns (
+        address creator,
+        string memory title,
+        string memory description,
+        uint256 reward,
+        uint256 deadline,
+        TaskStatus status
+    ) {
+        Task storage task = tasks[taskId];
+        return (
+            task.creator,
+            task.title,
+            task.description,
+            task.reward,
+            task.deadline,
+            task.status
+        );
+    }
+    
+    /**
+     * @dev Get task execution info
+     * @param taskId ID of the task
+     * @return capabilities Required capabilities
+     * @return minReputation Minimum reputation required
+     * @return assignedAgent Assigned agent address
+     * @return createdAt Creation timestamp
+     * @return completedAt Completion timestamp
+     * @return result Task result
+     */
+    function getTaskExecutionDetails(bytes32 taskId) external view returns (
+        string[] memory capabilities,
+        uint256 minReputation,
+        address assignedAgent,
+        uint256 createdAt,
+        uint256 completedAt,
+        string memory result
+    ) {
+        Task storage task = tasks[taskId];
+        return (
+            task.capabilities,
+            task.minReputation,
+            task.assignedAgent,
+            task.createdAt,
+            task.completedAt,
+            task.result
+        );
+    }
+    
+    /**
+     * @dev Start collaboration conversation for a task
+     * @param taskId ID of the task
+     * @param conversationId Unique conversation identifier
+     * @param participants Array of participant addresses
+     * @param conversationTopic Topic of the conversation
+     */
+    function startCollaborationConversation(
+        bytes32 taskId,
+        string memory conversationId,
+        address[] memory participants,
+        string memory conversationTopic
+    ) external {
+        Task storage task = tasks[taskId];
+        
+        require(task.status == TaskStatus.Assigned, "Task not assigned");
+        require(participants.length > 0, "At least one participant required");
+        require(bytes(conversationId).length > 0, "Conversation ID required");
+        
+        // Emit collaboration conversation started event
+        emit CollaborationConversationStarted(
+            taskId,
+            conversationId,
+            participants,
+            conversationTopic,
+            block.timestamp
+        );
+    }
+    
+    /**
+     * @dev Record a collaboration message
+     * @param taskId ID of the task
+     * @param conversationId Unique conversation identifier
+     * @param sender Address of the message sender
+     * @param message The message content
+     * @param messageIndex Index of the message in the conversation
+     */
+    function recordCollaborationMessage(
+        bytes32 taskId,
+        string memory conversationId,
+        address sender,
+        string memory message,
+        uint256 messageIndex
+    ) external {
+        Task storage task = tasks[taskId];
+        
+        require(task.status == TaskStatus.Assigned, "Task not assigned");
+        require(bytes(conversationId).length > 0, "Conversation ID required");
+        require(bytes(message).length > 0, "Message cannot be empty");
+        
+        // Emit collaboration message event
+        emit CollaborationMessage(
+            taskId,
+            conversationId,
+            sender,
+            message,
+            messageIndex,
+            block.timestamp
+        );
+    }
+    
+    /**
+     * @dev Record collaboration result
+     * @param taskId ID of the task
+     * @param conversationId Unique conversation identifier
+     * @param participants Array of participant addresses
+     * @param result The final result of the collaboration
+     * @param conversationSummary Summary of the conversation
+     */
+    function recordCollaborationResult(
+        bytes32 taskId,
+        string memory conversationId,
+        address[] memory participants,
+        string memory result,
+        string memory conversationSummary
+    ) external {
+        Task storage task = tasks[taskId];
+        
+        require(task.status == TaskStatus.Assigned, "Task not assigned");
+        require(bytes(conversationId).length > 0, "Conversation ID required");
+        require(bytes(result).length > 0, "Result cannot be empty");
+        
+        // Update task result
+        task.result = result;
+        
+        // Emit collaboration result event
+        emit CollaborationResult(
+            taskId,
+            conversationId,
+            participants,
+            result,
+            conversationSummary,
+            block.timestamp
+        );
     }
 }

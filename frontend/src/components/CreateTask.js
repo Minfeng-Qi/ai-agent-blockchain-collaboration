@@ -61,11 +61,12 @@ const CreateTask = () => {
   });
   
   const [formData, setFormData] = useState({
+    title: '',
     description: '',
     reward: '',
-    requirements: [],
+    required_capabilities: [],
     deadline: '',
-    complexity: 'medium',
+    min_reputation: 0,
     tags: []
   });
   
@@ -95,14 +96,14 @@ const CreateTask = () => {
     
     setFormData({
       ...formData,
-      requirements: typeof value === 'string' ? value.split(',') : value,
+      required_capabilities: typeof value === 'string' ? value.split(',') : value,
     });
     
     // Clear error when field is edited
-    if (errors.requirements) {
+    if (errors.required_capabilities) {
       setErrors({
         ...errors,
-        requirements: null
+        required_capabilities: null
       });
     }
   };
@@ -127,18 +128,22 @@ const CreateTask = () => {
   const validateForm = () => {
     const newErrors = {};
     
+    if (!formData.title.trim()) {
+      newErrors.title = 'Title is required';
+    }
+    
     if (!formData.description.trim()) {
       newErrors.description = 'Description is required';
     }
     
     if (!formData.reward) {
       newErrors.reward = 'Reward is required';
-    } else if (isNaN(formData.reward) || parseInt(formData.reward) <= 0) {
+    } else if (isNaN(formData.reward) || parseFloat(formData.reward) <= 0) {
       newErrors.reward = 'Reward must be a positive number';
     }
     
-    if (formData.requirements.length === 0) {
-      newErrors.requirements = 'At least one requirement is required';
+    if (formData.required_capabilities.length === 0) {
+      newErrors.required_capabilities = 'At least one capability is required';
     }
     
     if (!formData.deadline) {
@@ -170,9 +175,12 @@ const CreateTask = () => {
       const deadlineTimestamp = Math.floor(deadlineDate.getTime() / 1000);
       
       const taskData = {
-        ...formData,
-        reward: parseInt(formData.reward),
-        deadline: deadlineTimestamp
+        title: formData.title,
+        description: formData.description,
+        required_capabilities: formData.required_capabilities,
+        reward: parseFloat(formData.reward),
+        deadline: deadlineTimestamp,
+        min_reputation: formData.min_reputation || 0
       };
       
       await axios.post('http://localhost:8001/tasks', taskData);
@@ -225,6 +233,19 @@ const CreateTask = () => {
             <Grid item xs={12}>
               <TextField
                 fullWidth
+                label="Task Title"
+                name="title"
+                value={formData.title}
+                onChange={handleChange}
+                error={!!errors.title}
+                helperText={errors.title}
+                required
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
                 label="Task Description"
                 name="description"
                 value={formData.description}
@@ -269,14 +290,14 @@ const CreateTask = () => {
             </Grid>
             
             <Grid item xs={12} sm={6}>
-              <FormControl fullWidth error={!!errors.requirements}>
-                <InputLabel id="requirements-label">Requirements</InputLabel>
+              <FormControl fullWidth error={!!errors.required_capabilities}>
+                <InputLabel id="capabilities-label">Required Capabilities</InputLabel>
                 <Select
-                  labelId="requirements-label"
+                  labelId="capabilities-label"
                   multiple
-                  value={formData.requirements}
+                  value={formData.required_capabilities}
                   onChange={handleRequirementsChange}
-                  input={<OutlinedInput label="Requirements" />}
+                  input={<OutlinedInput label="Required Capabilities" />}
                   renderValue={(selected) => (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {selected.map((value) => (
@@ -295,27 +316,23 @@ const CreateTask = () => {
                     </MenuItem>
                   ))}
                 </Select>
-                {errors.requirements && (
-                  <FormHelperText>{errors.requirements}</FormHelperText>
+                {errors.required_capabilities && (
+                  <FormHelperText>{errors.required_capabilities}</FormHelperText>
                 )}
               </FormControl>
             </Grid>
             
             <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel id="complexity-label">Complexity</InputLabel>
-                <Select
-                  labelId="complexity-label"
-                  name="complexity"
-                  value={formData.complexity}
-                  onChange={handleChange}
-                  label="Complexity"
-                >
-                  <MenuItem value="low">Low</MenuItem>
-                  <MenuItem value="medium">Medium</MenuItem>
-                  <MenuItem value="high">High</MenuItem>
-                </Select>
-              </FormControl>
+              <TextField
+                fullWidth
+                label="Minimum Reputation"
+                name="min_reputation"
+                type="number"
+                value={formData.min_reputation}
+                onChange={handleChange}
+                helperText="Minimum reputation required for agents to bid on this task"
+                inputProps={{ min: 0 }}
+              />
             </Grid>
             
             <Grid item xs={12}>

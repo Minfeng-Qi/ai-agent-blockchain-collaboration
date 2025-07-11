@@ -91,6 +91,18 @@ const TaskList = () => {
   useEffect(() => {
     fetchTasks();
   }, [agentFilter, tabValue]);
+
+  // 当页面重新获得焦点时刷新数据
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchTasks();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
   
   const fetchTasks = async () => {
     setLoading(true);

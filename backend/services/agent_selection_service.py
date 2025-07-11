@@ -319,27 +319,52 @@ class AgentSelectionService:
             Dict: 分配结果
         """
         try:
-            # 获取任务信息
-            task_result = contract_service.get_task(task_id)
-            if not task_result.get("success"):
+            import requests
+            
+            # 通过API获取任务信息，避免循环调用
+            try:
+                task_response = requests.get(f"http://localhost:8001/tasks/{task_id}", timeout=10)
+                if task_response.status_code == 200:
+                    task_data = task_response.json()
+                    task = task_data.get("task")
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to get task: HTTP {task_response.status_code}",
+                        "task_id": task_id
+                    }
+            except Exception as e:
                 return {
                     "success": False,
-                    "error": f"Failed to get task: {task_result.get('error')}",
+                    "error": f"Failed to get task via API: {str(e)}",
                     "task_id": task_id
                 }
             
-            task = task_result.get("task")
-            
-            # 获取所有代理
-            agents_result = contract_service.get_all_agents()
-            if not agents_result.get("success"):
+            if not task:
                 return {
                     "success": False,
-                    "error": f"Failed to get agents: {agents_result.get('error')}",
+                    "error": "Task not found or empty",
                     "task_id": task_id
                 }
             
-            agents = agents_result.get("agents", [])
+            # 通过API获取所有代理
+            try:
+                agents_response = requests.get(f"http://localhost:8001/agents/", timeout=10)
+                if agents_response.status_code == 200:
+                    agents_data = agents_response.json()
+                    agents = agents_data.get("agents", [])
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to get agents: HTTP {agents_response.status_code}",
+                        "task_id": task_id
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to get agents via API: {str(e)}",
+                    "task_id": task_id
+                }
             
             # 选择最佳代理
             best_agent = await AgentSelectionService.select_best_agent(task, agents)
@@ -351,8 +376,21 @@ class AgentSelectionService:
                     "task_id": task_id
                 }
             
-            # 分配任务
-            return await AgentSelectionService.assign_task(task_id, best_agent.get("agent_id"))
+            # 返回推荐结果（不实际分配，只是推荐）
+            return {
+                "success": True,
+                "task_id": task_id,
+                "selected_agent": {
+                    "agent_id": best_agent.get("agent_id"),
+                    "name": best_agent.get("name"),
+                    "capabilities": best_agent.get("capabilities"),
+                    "reputation": best_agent.get("reputation"),
+                    "match_score": round(best_agent.get("score", 0) * 100, 2)
+                },
+                "task_title": task.get("title"),
+                "required_capabilities": task.get("required_capabilities"),
+                "message": "Best agent selected successfully"
+            }
                 
         except Exception as e:
             logger.exception(f"Error auto-assigning task {task_id}")
@@ -375,27 +413,52 @@ class AgentSelectionService:
             Dict: 分配结果
         """
         try:
-            # 获取任务信息
-            task_result = contract_service.get_task(task_id)
-            if not task_result.get("success"):
+            import requests
+            
+            # 通过API获取任务信息，避免循环调用
+            try:
+                task_response = requests.get(f"http://localhost:8001/tasks/{task_id}", timeout=10)
+                if task_response.status_code == 200:
+                    task_data = task_response.json()
+                    task = task_data.get("task")
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to get task: HTTP {task_response.status_code}",
+                        "task_id": task_id
+                    }
+            except Exception as e:
                 return {
                     "success": False,
-                    "error": f"Failed to get task: {task_result.get('error')}",
+                    "error": f"Failed to get task via API: {str(e)}",
                     "task_id": task_id
                 }
             
-            task = task_result.get("task")
-            
-            # 获取所有代理
-            agents_result = contract_service.get_all_agents()
-            if not agents_result.get("success"):
+            if not task:
                 return {
                     "success": False,
-                    "error": f"Failed to get agents: {agents_result.get('error')}",
+                    "error": "Task not found or empty",
                     "task_id": task_id
                 }
             
-            agents = agents_result.get("agents", [])
+            # 通过API获取所有代理
+            try:
+                agents_response = requests.get(f"http://localhost:8001/agents/", timeout=10)
+                if agents_response.status_code == 200:
+                    agents_data = agents_response.json()
+                    agents = agents_data.get("agents", [])
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to get agents: HTTP {agents_response.status_code}",
+                        "task_id": task_id
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to get agents via API: {str(e)}",
+                    "task_id": task_id
+                }
             
             # 选择协作代理
             selected_agents = await AgentSelectionService.select_collaborative_agents(task, agents, max_agents)
@@ -407,11 +470,43 @@ class AgentSelectionService:
                     "task_id": task_id
                 }
             
-            # 获取代理ID列表
-            agent_ids = [a.get("agent_id") for a in selected_agents]
+            # 分析团队能力覆盖
+            required_capabilities = set(task.get("required_capabilities", []))
+            covered_capabilities = set()
+            for agent in selected_agents:
+                agent_caps = agent.get("capabilities", [])
+                covered_capabilities.update(cap for cap in agent_caps if cap in required_capabilities)
             
-            # 分配任务
-            return await AgentSelectionService.assign_collaborative_task(task_id, agent_ids)
+            coverage_ratio = len(covered_capabilities) / len(required_capabilities) if required_capabilities else 1.0
+            
+            # 返回协作团队推荐结果
+            return {
+                "success": True,
+                "task_id": task_id,
+                "task_title": task.get("title"),
+                "required_capabilities": list(required_capabilities),
+                "selected_agents": [
+                    {
+                        "agent_id": agent.get("agent_id"),
+                        "name": agent.get("name"),
+                        "agent_type": agent.get("agent_type"),
+                        "capabilities": agent.get("capabilities"),
+                        "reputation": agent.get("reputation"),
+                        "match_score": round(agent.get("score", 0) * 100, 2),
+                        "role": "协调者" if agent.get("agent_type") == 2 else "评估者" if agent.get("agent_type") == 3 else "执行者"
+                    }
+                    for agent in selected_agents
+                ],
+                "team_analysis": {
+                    "team_size": len(selected_agents),
+                    "capability_coverage": round(coverage_ratio * 100, 2),
+                    "covered_capabilities": list(covered_capabilities),
+                    "missing_capabilities": list(required_capabilities - covered_capabilities),
+                    "average_reputation": round(sum(a.get("reputation", 0) for a in selected_agents) / len(selected_agents), 1),
+                    "team_score": round(sum(a.get("score", 0) for a in selected_agents) / len(selected_agents) * 100, 2)
+                },
+                "message": f"Successfully selected {len(selected_agents)} agents for collaborative task"
+            }
                 
         except Exception as e:
             logger.exception(f"Error auto-assigning collaborative task {task_id}")

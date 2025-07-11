@@ -44,7 +44,7 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/core/AgentRegistry.sol": {
-      "lastModificationDate": 1752040347175,
+      "lastModificationDate": 1752040355420,
       "contentHash": "6160a0caea569c7d3f908eb3d71bd08d",
       "sourceName": "core/AgentRegistry.sol",
       "solcConfig": {
@@ -472,8 +472,8 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/core/TaskMarketplace.sol": {
-      "lastModificationDate": 1751978619511,
-      "contentHash": "927b38558e6f9eb5eeacd2fd3c8e5dc8",
+      "lastModificationDate": 1752122918481,
+      "contentHash": "2988cf8fee817dd186c241f3a00a0980",
       "sourceName": "core/TaskMarketplace.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -515,8 +515,8 @@
       ]
     },
     "/Users/minfeng/Desktop/llm-blockchain/code/contracts-clean/core/TaskManager.sol": {
-      "lastModificationDate": 1751978619414,
-      "contentHash": "b7575fdf8f628929e0719dfecec1e90e",
+      "lastModificationDate": 1752251593028,
+      "contentHash": "9d3ab5e181f5592a007851575f05be85",
       "sourceName": "core/TaskManager.sol",
       "solcConfig": {
         "version": "0.8.20",

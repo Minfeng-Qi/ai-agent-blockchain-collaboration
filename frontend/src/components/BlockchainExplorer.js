@@ -71,6 +71,46 @@ const TransactionStatusChip = ({ status }) => {
   );
 };
 
+// 获取事件显示名称
+const getEventDisplayName = (eventName) => {
+  const eventDisplayMap = {
+    'TaskCreated': 'Task Created',
+    'TaskStatusUpdated': 'Task Status Updated',
+    'TaskAssigned': 'Task Assigned',
+    'TaskCompleted': 'Task Completed',
+    'TaskFailed': 'Task Failed',
+    'TaskCancelled': 'Task Cancelled',
+    'AgentCollaborationStarted': 'Agent Collaboration Started',
+    'TaskEvaluated': 'Task Evaluated',
+    'AgentRegistered': 'Agent Registered',
+    'AgentActivated': 'Agent Activated',
+    'AgentDeactivated': 'Agent Deactivated',
+    'LearningEvent': 'Learning Event'
+  };
+  
+  return eventDisplayMap[eventName] || eventName;
+};
+
+// 获取事件颜色
+const getEventColor = (eventName) => {
+  const eventColorMap = {
+    'TaskCreated': 'primary',
+    'TaskStatusUpdated': 'info',
+    'TaskAssigned': 'warning',
+    'TaskCompleted': 'success',
+    'TaskFailed': 'error',
+    'TaskCancelled': 'error',
+    'AgentCollaborationStarted': 'secondary',
+    'TaskEvaluated': 'success',
+    'AgentRegistered': 'primary',
+    'AgentActivated': 'success',
+    'AgentDeactivated': 'warning',
+    'LearningEvent': 'info'
+  };
+  
+  return eventColorMap[eventName] || 'default';
+};
+
 // 地址简写组件
 const ShortAddress = ({ address }) => {
   const shortAddr = address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : 'N/A';
@@ -536,9 +576,9 @@ const BlockchainExplorer = () => {
                   >
                     <TableCell>
                       <Chip 
-                        label={event.event_name} 
+                        label={getEventDisplayName(event.event_name)} 
                         size="small" 
-                        color="primary" 
+                        color={getEventColor(event.event_name)} 
                         variant="outlined" 
                       />
                     </TableCell>

@@ -15,25 +15,29 @@ except ImportError:
     except ImportError:
         ExtraDataToPOAMiddleware = None
 
-# 配置日志
+# 自动生成的合约地址 (checksum格式)
+contract_addresses = {
+    "AgentRegistry": "0x5F34e26Ec2f59d13EfA72a0fBF87CCD2Fa78Ac03",
+    "ActionLogger": "0x97623D91aaaFe4b57ed5f074570346b38eaeAcC9",
+    "IncentiveEngine": "0x7435315BA8095B30f592d2288dE558348faba3Da",
+    "TaskManager": "0xCD7CCef31AEFC470B2af0c4dDaB0f252EA32C127",
+    "BidAuction": "0xf098aD08F4BD8f980173ad721087bf4299efc374",
+    "MessageHub": "0x6B8e60414aCc0Ff3B8B4a568e449EA2765d37dcd",
+    "Learning": "0x7dE237B5944219d59412A707fE27CBD26f6F09cF",
+}
+
+# 配置
+GANACHE_URL = "http://127.0.0.1:8545"
+PRIVATE_KEY = "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"  # Ganache test account
+
+# 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 区块链连接配置
-GANACHE_URL = "http://127.0.0.1:8545"
-
 # Web3实例
-w3 = Web3(HTTPProvider(GANACHE_URL))
+w3 = None
 
-# 添加PoA中间件（Ganache需要）
-if w3.is_connected():
-    if ExtraDataToPOAMiddleware:
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-    logger.info("Connected to Ganache blockchain")
-else:
-    logger.warning("Failed to connect to Ganache blockchain")
-
-# 全局合约实例
+# 合约实例
 agent_registry_contract = None
 action_logger_contract = None
 incentive_engine_contract = None
@@ -42,31 +46,40 @@ bid_auction_contract = None
 message_hub_contract = None
 learning_contract = None
 
-def load_contract(contract_name: str):
-    """
-    加载合约实例
-    """
+def init_web3():
+    """初始化Web3连接"""
+    global w3
+    
     try:
-        # 读取ABI
-        abi_path = f"/Users/minfeng/Desktop/llm-blockchain/code/backend/contracts/abi/{contract_name}.json"
+        w3 = Web3(HTTPProvider(GANACHE_URL))
         
+        # 为PoA网络添加中间件
+        if ExtraDataToPOAMiddleware:
+            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        
+        # 设置默认账户
+        w3.eth.default_account = w3.eth.accounts[0]
+        
+        logger.info(f"Web3 connected to {GANACHE_URL}")
+        logger.info(f"Chain ID: {w3.eth.chain_id}")
+        logger.info(f"Latest block: {w3.eth.block_number}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize Web3: {str(e)}")
+        return False
+
+def load_contract(contract_name: str):
+    """加载智能合约"""
+    try:
+        # 加载ABI
+        abi_path = f"contracts/abi/{contract_name}.json"
         if not os.path.exists(abi_path):
             logger.error(f"ABI file not found: {abi_path}")
             return None
-        
+            
         with open(abi_path, 'r') as f:
             contract_data = json.load(f)
-        
-        # 更新的合约地址 (最新部署 - 支持updateTask) - 支持capabilities
-        contract_addresses = {
-            "AgentRegistry": "0xeE4F32aE44860D5014b17E0D4ee2FA1cEE8c746d",
-            "ActionLogger": "0x2Ca00F39a318af904F3276935681252Ca9B3c691",
-            "IncentiveEngine": "0x9F34d03adACc3F86AB17DcaB90EA03b37B0078f7",
-            "TaskManager": "0x61Ac754f0a5863d8DecF144D8060ADebc733D0a5",
-            "BidAuction": "0x81C67A4bC5f1351B3CE178b234F33403df688337",
-            "MessageHub": "0xaA908cAA663Fa96784Ea7d40968d93158b30cac1",
-            "Learning": "0x6AEb9Cc75d7d85f6647d6B90b58Fc1bbB61a9Cb3",
-        }
         
         contract_address = contract_addresses.get(contract_name)
         if not contract_address:
@@ -212,6 +225,9 @@ def get_agent(agent_address: str) -> Dict[str, Any]:
             logger.warning(f"Error getting capabilities for agent {agent_address}: {str(e)}")
             capability_weights = []
         
+        # 获取代理的任务统计信息
+        task_stats = get_agent_task_statistics(agent_address)
+        
         return {
             "success": True,
             "agent": {
@@ -223,12 +239,25 @@ def get_agent(agent_address: str) -> Dict[str, Any]:
                 "active": agent_data[4],
                 "registered_at": agent_data[5],
                 "agent_type": agent_data[6],
-                "capability_weights": capability_weights
+                "capability_weights": capability_weights,
+                # 添加任务统计信息
+                "total_tasks": task_stats.get("total_tasks", 0),
+                "workload": task_stats.get("workload", 0),
+                "successful_tasks": task_stats.get("successful_tasks", 0),
+                "failed_tasks": task_stats.get("failed_tasks", 0),
+                "average_score": task_stats.get("average_score", 0.0),
+                "total_earnings": task_stats.get("total_earnings", 0.0)
             }
         }
     except Exception as e:
         logger.error(f"Error getting agent {agent_address}: {str(e)}")
         return {"success": False, "error": str(e)}
+
+def get_agent_by_address(agent_address: str) -> Dict[str, Any]:
+    """
+    根据地址获取代理信息（与get_agent相同，为了兼容性）
+    """
+    return get_agent(agent_address)
 
 def get_bidding_strategy(agent_address: str) -> Dict[str, Any]:
     """
@@ -355,8 +384,8 @@ def get_task_collaboration_agents(task_id_bytes: bytes) -> List[str]:
     try:
         # 使用Web3.py 6.0.0兼容的事件过滤器
         event_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
-            fromBlock='earliest',
-            toBlock='latest',
+            from_block='earliest',
+            to_block='latest',
             argument_filters={'taskId': task_id_bytes}
         )
         
@@ -495,6 +524,93 @@ def get_all_tasks() -> Dict[str, Any]:
         logger.error(f"Error getting all tasks: {str(e)}")
         return {"success": False, "error": str(e)}
 
+def get_agent_task_statistics(agent_address: str) -> Dict[str, Any]:
+    """
+    获取代理的任务统计信息
+    """
+    try:
+        # 获取该代理的所有任务
+        agent_tasks_result = get_agent_tasks(agent_address)
+        if not agent_tasks_result.get("success"):
+            return {
+                "total_tasks": 0,
+                "workload": 0,
+                "successful_tasks": 0,
+                "failed_tasks": 0,
+                "average_score": 0.0,
+                "total_earnings": 0.0
+            }
+        
+        agent_tasks = agent_tasks_result.get("tasks", [])
+        
+        # 计算统计信息
+        total_tasks = len(agent_tasks)
+        successful_tasks = len([t for t in agent_tasks if t.get("status") == "completed"])
+        failed_tasks = len([t for t in agent_tasks if t.get("status") == "failed"])
+        in_progress_tasks = len([t for t in agent_tasks if t.get("status") in ["assigned", "in_progress"]])
+        
+        # 计算总收益
+        total_earnings = sum(t.get("reward", 0) for t in agent_tasks if t.get("status") == "completed")
+        
+        # 计算平均得分 (简化版本，基于成功率)
+        average_score = (successful_tasks / total_tasks * 100) if total_tasks > 0 else 0.0
+        
+        return {
+            "total_tasks": total_tasks,
+            "workload": in_progress_tasks,
+            "successful_tasks": successful_tasks,
+            "failed_tasks": failed_tasks,
+            "average_score": round(average_score, 1),
+            "total_earnings": total_earnings
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting task statistics for agent {agent_address}: {str(e)}")
+        return {
+            "total_tasks": 0,
+            "workload": 0,
+            "successful_tasks": 0,
+            "failed_tasks": 0,
+            "average_score": 0.0,
+            "total_earnings": 0.0
+        }
+
+def get_agent_tasks(agent_address: str) -> Dict[str, Any]:
+    """
+    获取特定代理的所有任务（被分配的任务）
+    """
+    if not task_manager_contract:
+        logger.error("Task manager contract not initialized")
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 获取所有任务
+        all_tasks_result = get_all_tasks()
+        if not all_tasks_result.get("success"):
+            return all_tasks_result
+        
+        all_tasks = all_tasks_result.get("tasks", [])
+        agent_tasks = []
+        
+        # 过滤出分配给该代理的任务
+        for task in all_tasks:
+            # 检查是否是主要分配的代理
+            if task.get("assigned_agent") == agent_address:
+                agent_tasks.append(task)
+            # 检查是否在协作代理列表中
+            elif agent_address in task.get("assigned_agents", []):
+                agent_tasks.append(task)
+        
+        # 按创建时间排序（最新的在前）
+        agent_tasks.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+        
+        logger.info(f"Found {len(agent_tasks)} tasks for agent {agent_address}")
+        return {"success": True, "tasks": agent_tasks}
+        
+    except Exception as e:
+        logger.error(f"Error getting tasks for agent {agent_address}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 def assign_task(task_id: str, agent_id: str, sender_address: str) -> Dict[str, Any]:
     """
     分配任务给代理
@@ -511,8 +627,14 @@ def assign_task(task_id: str, agent_id: str, sender_address: str) -> Dict[str, A
             "nonce": w3.eth.get_transaction_count(sender_address)
         }
         
+        # 将task_id转换为bytes32格式
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            task_id_bytes = bytes.fromhex(task_id)
+        
         # 调用合约方法
-        tx_hash = task_manager_contract.functions.assignTask(task_id, agent_id).transact(tx_data)
+        tx_hash = task_manager_contract.functions.assignTask(task_id_bytes, agent_id).transact(tx_data)
         
         # 等待交易确认
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash)

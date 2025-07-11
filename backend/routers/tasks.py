@@ -10,6 +10,21 @@ from services.chatgpt_service import collaboration_service
 from services.collaboration_db_service import collaboration_db_service
 from services.agent_selection_service import agent_selection_service
 
+def get_sender_address():
+    """
+    动态获取Ganache的第一个账户地址作为发送者
+    """
+    try:
+        if contract_service.w3 and contract_service.w3.is_connected():
+            accounts = contract_service.w3.eth.accounts
+            if accounts and len(accounts) > 0:
+                return accounts[0]
+        # fallback地址，虽然可能不工作
+        return "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+    except Exception as e:
+        logger.error(f"Error getting sender address: {str(e)}")
+        return "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -184,8 +199,8 @@ async def create_task(
     connection_status = contract_service.get_connection_status()
     if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
         try:
-            # 获取发送者地址（在实际应用中，这可能来自认证系统）
-            sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"  # 使用Ganache的第一个账户
+            # 动态获取发送者地址
+            sender_address = get_sender_address()
             
             # 调用合约服务创建任务
             result = contract_service.create_task(task, sender_address)
@@ -245,8 +260,8 @@ async def update_task(
     connection_status = contract_service.get_connection_status()
     if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
         try:
-            # 获取发送者地址（使用Ganache的第一个账户）
-            sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+            # 动态获取发送者地址
+            sender_address = get_sender_address()
             
             # 调用合约服务更新任务
             result = contract_service.update_task(task_id, task_data, sender_address)
@@ -464,8 +479,8 @@ async def delete_task(task_id: str):
     connection_status = contract_service.get_connection_status()
     if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
         try:
-            # 获取发送者地址（使用Ganache的第一个账户）
-            sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+            # 动态获取发送者地址
+            sender_address = get_sender_address()
             
             # 调用合约服务取消任务
             result = contract_service.cancel_task(task_id, sender_address)
@@ -546,8 +561,8 @@ async def start_task_collaboration(
                 # 生成协作ID
                 collaboration_id = f"collab_{task_id}_{int(datetime.now().timestamp())}"
                 
-                # 获取发送者地址（在实际应用中，这可能来自认证系统）
-                sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"  # 使用第一个Ganache账户
+                # 动态获取发送者地址
+                sender_address = get_sender_address()
                 
                 # 启动协作
                 result = contract_service.start_agent_collaboration(
@@ -1029,8 +1044,8 @@ async def start_real_collaboration(
             agent_roles=collaboration_service.conversations[conversation_id]["agent_roles"]
         )
         
-        # 启动协作对话
-        messages = await collaboration_service.start_collaboration(conversation_id)
+        # 启动分布式协作对话
+        messages = await collaboration_service.start_distributed_collaboration(conversation_id)
         
         # 保存消息到数据库
         for message in messages:
@@ -1045,7 +1060,7 @@ async def start_real_collaboration(
         
         # 在区块链上记录对话开始事件
         try:
-            sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+            sender_address = get_sender_address()
             blockchain_result = contract_service.record_collaboration_conversation_start(
                 task_id=task_id,
                 conversation_id=conversation_id,
@@ -1108,7 +1123,7 @@ async def finalize_collaboration(
         
         # 在区块链上记录协作结果
         try:
-            sender_address = "0xc74024c471D840D6cd996a1dd92Cd2F3993D1220"
+            sender_address = get_sender_address()
             blockchain_result = contract_service.record_collaboration_result(
                 task_id=task_id,
                 conversation_id=conversation_id,

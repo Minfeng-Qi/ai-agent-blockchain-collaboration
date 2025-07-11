@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
-from routers import agents, tasks, learning, blockchain, analytics  # collaboration temporarily disabled
+from routers import agents, tasks, learning, blockchain, analytics, agent_selection, simple_task_assignment  # collaboration temporarily disabled
 from services import contract_service
 
 # 配置日志
@@ -51,6 +51,8 @@ app.include_router(learning, prefix="/learning", tags=["learning"])
 app.include_router(blockchain, prefix="/blockchain", tags=["blockchain"])
 # app.include_router(collaboration, prefix="/collaboration", tags=["collaboration"])  # Temporarily disabled
 app.include_router(analytics, prefix="/analytics", tags=["analytics"])
+app.include_router(agent_selection, prefix="/agent-selection", tags=["agent_selection"])
+app.include_router(simple_task_assignment, prefix="/task-assignment", tags=["task_assignment"])
 
 # 自定义OpenAPI
 def custom_openapi():
@@ -158,6 +160,22 @@ async def system_stats():
             "error": "Failed to generate system statistics",
             "timestamp": datetime.now().isoformat()
         }
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时的初始化"""
+    logger.info("Initializing backend services...")
+    
+    # 初始化Web3连接
+    if contract_service.init_web3():
+        logger.info("Web3 connection initialized successfully")
+        # 初始化合约
+        if contract_service.initialize_contracts():
+            logger.info("Smart contracts initialized successfully")
+        else:
+            logger.warning("Failed to initialize smart contracts")
+    else:
+        logger.warning("Failed to initialize Web3 connection")
 
 if __name__ == "__main__":
     import uvicorn

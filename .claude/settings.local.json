@@ -87,7 +87,9 @@
       "Bash(./stop_backend.sh:*)",
       "Bash(./start_backend.sh:*)",
       "Bash(open:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(./start_backend_external_ganache.sh:*)",
+      "Bash(./quick_setup.sh:*)"
     ],
     "deny": []
   }

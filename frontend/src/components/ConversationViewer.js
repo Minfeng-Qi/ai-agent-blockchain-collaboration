@@ -278,7 +278,7 @@ const ConversationViewer = () => {
                 const isSystemMessage = message.sender_address === 'system';
                 
                 return (
-                  <Box key={message.id} sx={{ mb: 2 }}>
+                  <Box key={message.id || index} sx={{ mb: 2 }}>
                     <Paper elevation={1} sx={{ p: 2 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -287,32 +287,53 @@ const ConversationViewer = () => {
                               width: 32, 
                               height: 32, 
                               mr: 1.5,
-                              bgcolor: isSystemMessage ? '#9e9e9e' : generateAvatarColor(message.sender_address)
+                              bgcolor: isSystemMessage ? '#9e9e9e' : generateAvatarColor(message.sender_address || message.sender)
                             }}
                           >
-                            {isSystemMessage ? <ScheduleIcon fontSize="small" /> : message.sender_address.substring(2, 4)}
+                            {isSystemMessage ? <ScheduleIcon fontSize="small" /> : (message.sender_address || message.sender).substring(2, 4)}
                           </Avatar>
                           <Box>
                             <Typography variant="subtitle2">
                               {isSystemMessage 
                                 ? 'System' 
-                                : agentRole?.agent_name || `Agent ${message.message_index + 1}`
+                                : message.agent_name || agentRole?.agent_name || `Agent ${message.message_index + 1}`
                               }
                             </Typography>
                             {!isSystemMessage && (
                               <Typography variant="caption" color="textSecondary">
-                                {formatAddress(message.sender_address)}
+                                {formatAddress(message.sender_address || message.sender)}
                               </Typography>
                             )}
                           </Box>
-                          {message.round_number && (
+                          {(message.round || message.round_number) && (
                             <Chip 
-                              label={`Round ${message.round_number}`}
+                              label={`Round ${message.round || message.round_number}`}
                               size="small"
                               sx={{ ml: 2 }}
                               color="primary"
                               variant="outlined"
                             />
+                          )}
+                          {message.agent_capabilities && message.agent_capabilities.length > 0 && (
+                            <Box sx={{ ml: 2, display: 'flex', gap: 0.5 }}>
+                              {message.agent_capabilities.slice(0, 2).map((capability, idx) => (
+                                <Chip 
+                                  key={idx}
+                                  label={capability}
+                                  size="small"
+                                  variant="outlined"
+                                  color="secondary"
+                                />
+                              ))}
+                              {message.agent_capabilities.length > 2 && (
+                                <Chip 
+                                  label={`+${message.agent_capabilities.length - 2}`}
+                                  size="small"
+                                  variant="outlined"
+                                  color="secondary"
+                                />
+                              )}
+                            </Box>
                           )}
                         </Box>
                         <Typography variant="caption" color="textSecondary">
@@ -338,50 +359,86 @@ const ConversationViewer = () => {
       </Card>
 
       {/* Final Result */}
-      {conversation.result && (
+      {(conversation.result || conversation.final_result) && (
         <Card>
           <CardHeader 
-            title="Collaboration Result"
+            title="Distributed Collaboration Result"
             avatar={<CheckCircleIcon color="success" />}
           />
           <CardContent>
-            <Accordion>
+            {/* Agent Collaboration Summary */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                🤖 AI Agent Collaboration Summary
+              </Typography>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This task was completed through distributed AI agent collaboration using real GPT API calls.
+                Each agent contributed based on their unique capabilities.
+              </Alert>
+            </Box>
+
+            <Accordion defaultExpanded>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography variant="subtitle1">Final Result Summary</Typography>
+                <Typography variant="subtitle1">📋 Quick Summary</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {conversation.result.conversation_summary}
+                  {(conversation.result?.conversation_summary || conversation.final_result?.conversation_summary) || 
+                   'Multiple AI agents collaborated to analyze and solve this task using their specialized capabilities.'}
                 </Typography>
               </AccordionDetails>
             </Accordion>
             
             <Accordion>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography variant="subtitle1">Detailed Result</Typography>
+                <Typography variant="subtitle1">🔍 Detailed Analysis & Solution</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {conversation.result.final_result}
+                  {(conversation.result?.final_result || conversation.final_result?.final_result) || 
+                   'Check the conversation messages above to see the detailed collaboration between agents.'}
                 </Typography>
               </AccordionDetails>
             </Accordion>
 
-            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box>
-                <Typography variant="caption" color="textSecondary">
-                  Completed: {formatTimestamp(conversation.result.created_at)}
-                </Typography>
-                <br />
-                <Typography variant="caption" color="textSecondary">
-                  Total Messages: {conversation.result.message_count}
-                </Typography>
+            {/* Collaboration Statistics */}
+            <Box sx={{ mt: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                📊 Collaboration Statistics
+              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="textSecondary">
+                    Participants: {conversation.participants?.length || 'N/A'} agents
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" color="textSecondary">
+                    Total Messages: {conversation.result?.message_count || conversation.messages?.length || 'N/A'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="textSecondary">
+                    Completed: {formatTimestamp(conversation.result?.completed_at || conversation.final_result?.completed_at || conversation.result?.created_at)}
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" color="textSecondary">
+                    Collaboration Rounds: {Math.max(...(conversation.messages?.map(m => m.round || m.round_number || 0).filter(r => r > 0) || [0]))} rounds
+                  </Typography>
+                </Box>
               </Box>
-              <Chip 
-                label={conversation.result.success ? 'Success' : 'Failed'}
-                color={conversation.result.success ? 'success' : 'error'}
-                size="small"
-              />
+              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip 
+                  label="Distributed AI Collaboration"
+                  color="primary"
+                  size="small"
+                  icon={<PsychologyIcon />}
+                />
+                <Chip 
+                  label={conversation.result?.success !== false ? 'Success' : 'Failed'}
+                  color={conversation.result?.success !== false ? 'success' : 'error'}
+                  size="small"
+                />
+              </Box>
             </Box>
           </CardContent>
         </Card>

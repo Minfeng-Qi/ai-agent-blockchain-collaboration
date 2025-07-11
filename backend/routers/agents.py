@@ -77,8 +77,8 @@ async def get_agents(
                             
                             # 添加agent card需要的字段
                             "capability_weights": agent.get("capability_weights", []),
-                            "workload": 0,  # 新agent没有任务历史
-                            "tasks_completed": 0,
+                            "workload": agent.get("workload", 0),
+                            "tasks_completed": agent.get("successful_tasks", 0),
                             "source": "blockchain",
                             
                             # 添加其他前端期望的字段
@@ -482,7 +482,49 @@ async def get_agent_tasks(
     if not agent_exists:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # 模拟任务数据
+    # 尝试从区块链获取真实任务数据
+    if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+        try:
+            tasks_result = contract_service.get_agent_tasks(agent_id)
+            if tasks_result.get("success"):
+                all_tasks = tasks_result.get("tasks", [])
+                
+                # 应用过滤器
+                if status:
+                    filtered_tasks = [t for t in all_tasks if t.get("status") == status]
+                else:
+                    filtered_tasks = all_tasks
+                
+                # 应用分页
+                paginated_tasks = filtered_tasks[offset:offset + limit]
+                
+                # 转换为前端期望的格式
+                formatted_tasks = []
+                for task in paginated_tasks:
+                    formatted_task = {
+                        "task_id": task.get("task_id"),
+                        "title": task.get("title"),
+                        "description": task.get("description"),
+                        "status": task.get("status"),
+                        "reward": task.get("reward"),
+                        "created_at": datetime.fromtimestamp(task.get("created_at", 0)).isoformat() + "Z" if task.get("created_at") else None,
+                        "completed_at": datetime.fromtimestamp(task.get("completed_at", 0)).isoformat() + "Z" if task.get("completed_at") else None,
+                        "required_capabilities": task.get("required_capabilities"),
+                        "is_collaboration": len(task.get("assigned_agents", [])) > 1,
+                        "role": "primary" if task.get("assigned_agent") == agent_id else "collaborator"
+                    }
+                    formatted_tasks.append(formatted_task)
+                
+                return {
+                    "agent_id": agent_id,
+                    "tasks": formatted_tasks,
+                    "total": len(filtered_tasks),
+                    "source": "blockchain"
+                }
+        except Exception as e:
+            logger.error(f"Error getting tasks from blockchain for agent {agent_id}: {str(e)}")
+    
+    # 回退到模拟数据
     mock_tasks = [
         {
             "task_id": "task_123",
@@ -688,16 +730,31 @@ async def get_agent(agent_id: str):
             if result["success"]:
                 # 获取代理的任务历史
                 task_history = []
+                recent_tasks = []
                 try:
-                    # 尝试从任务管理合约获取代理的任务历史
-                    # 如果没有任务历史或获取失败，返回空列表
-                    # task_result = contract_service.get_agent_tasks(agent_id)
-                    # if task_result["success"]:
-                    #     task_history = task_result["tasks"]
-                    task_history = []  # 新注册的智能体没有任务历史
+                    # 从任务管理合约获取代理的任务历史
+                    task_result = contract_service.get_agent_tasks(agent_id)
+                    if task_result["success"]:
+                        task_history = task_result["tasks"]
+                        # 格式化为前端期望的recent_tasks格式
+                        for task in task_history:
+                            recent_task = {
+                                "task_id": task.get("task_id"),
+                                "title": task.get("title"),
+                                "description": task.get("description"),
+                                "status": task.get("status"),
+                                "reward": task.get("reward"),
+                                "created_at": datetime.fromtimestamp(task.get("created_at", 0)).isoformat() + "Z" if task.get("created_at") else None,
+                                "completed_at": datetime.fromtimestamp(task.get("completed_at", 0)).isoformat() + "Z" if task.get("completed_at") else None,
+                                "required_capabilities": task.get("required_capabilities"),
+                                "is_collaboration": len(task.get("assigned_agents", [])) > 1,
+                                "role": "primary" if task.get("assigned_agent") == agent_id else "collaborator"
+                            }
+                            recent_tasks.append(recent_task)
                 except Exception as e:
                     logger.error(f"Error getting task history for agent {agent_id}: {str(e)}")
                     task_history = []
+                    recent_tasks = []
                 
                 # 获取代理的学习事件
                 learning_events = []
@@ -712,6 +769,7 @@ async def get_agent(agent_id: str):
                 # 构建完整的代理信息
                 agent_data = result["agent"].copy()  # 提取agent数据
                 agent_data["task_history"] = task_history
+                agent_data["recent_tasks"] = recent_tasks  # 添加格式化的recent_tasks
                 agent_data["learning_events"] = learning_events
                 agent_data["source"] = "blockchain"
                 

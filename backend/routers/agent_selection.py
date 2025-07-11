@@ -71,7 +71,8 @@ async def recommend_agents(
     """
     try:
         # 获取任务信息
-        task_result = agent_selection_service.contract_service.get_task(task_id)
+        from services import contract_service
+        task_result = contract_service.get_task(task_id)
         if not task_result.get("success"):
             raise HTTPException(
                 status_code=404, 
@@ -81,7 +82,7 @@ async def recommend_agents(
         task = task_result.get("task")
         
         # 获取所有代理
-        agents_result = agent_selection_service.contract_service.get_all_agents()
+        agents_result = contract_service.get_all_agents()
         if not agents_result.get("success"):
             raise HTTPException(
                 status_code=500, 
@@ -152,7 +153,8 @@ async def get_capability_coverage():
     """
     try:
         # 获取所有代理
-        agents_result = agent_selection_service.contract_service.get_all_agents()
+        from services import contract_service
+        agents_result = contract_service.get_all_agents()
         if not agents_result.get("success"):
             raise HTTPException(
                 status_code=500, 
