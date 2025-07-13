@@ -1526,6 +1526,200 @@ class EnhancedMockDataGenerator {
     
     return suggestions.slice(0, 3);
   }
+
+  /**
+   * 生成任务状态分布数据
+   */
+  getTaskStatusDistribution() {
+    return [
+      {
+        id: 'open',
+        label: 'Open',
+        value: Math.floor(Math.random() * 10) + 5,
+        color: '#2196F3'
+      },
+      {
+        id: 'assigned', 
+        label: 'Assigned',
+        value: Math.floor(Math.random() * 8) + 3,
+        color: '#FF9800'
+      },
+      {
+        id: 'completed',
+        label: 'Completed', 
+        value: Math.floor(Math.random() * 15) + 10,
+        color: '#4CAF50'
+      },
+      {
+        id: 'failed',
+        label: 'Failed',
+        value: Math.floor(Math.random() * 3) + 1,
+        color: '#F44336'
+      }
+    ];
+  }
+
+  /**
+   * 生成代理能力分布数据
+   */
+  getAgentCapabilitiesDistribution() {
+    const capabilities = Object.keys(AGENT_CAPABILITIES);
+    return capabilities.map(cap => {
+      const capInfo = AGENT_CAPABILITIES[cap];
+      return {
+        capability: capInfo.name,
+        count: Math.floor(Math.random() * 8) + 2,
+        percentage: Math.floor(Math.random() * 30) + 10
+      };
+    });
+  }
+
+  /**
+   * 生成任务完成趋势数据
+   */
+  getTaskCompletionTrend() {
+    const trend = [];
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+
+    for (let i = 0; i < 30; i++) {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + i);
+      
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      const baseCompleted = isWeekend ? 2 : 5;
+      const baseCreated = isWeekend ? 3 : 7;
+      
+      trend.push({
+        date: date.toISOString().split('T')[0],
+        completed: baseCompleted + Math.floor(Math.random() * 4),
+        created: baseCreated + Math.floor(Math.random() * 5),
+        failed: Math.floor(Math.random() * 2)
+      });
+    }
+
+    return trend;
+  }
+
+  /**
+   * 生成系统状态数据
+   */
+  getSystemStatus() {
+    return {
+      agents: {
+        total: Math.floor(Math.random() * 20) + 15,
+        active: Math.floor(Math.random() * 15) + 10,
+        online: Math.floor(Math.random() * 12) + 8
+      },
+      tasks: {
+        total: Math.floor(Math.random() * 50) + 30,
+        completed: Math.floor(Math.random() * 25) + 15,
+        pending: Math.floor(Math.random() * 10) + 5
+      },
+      blockchain: {
+        blockHeight: Math.floor(Math.random() * 10000) + 50000,
+        transactionCount: Math.floor(Math.random() * 1000) + 500,
+        connected: true
+      },
+      performance: {
+        averageResponseTime: (Math.random() * 2 + 0.5).toFixed(2),
+        successRate: (0.85 + Math.random() * 0.14).toFixed(3),
+        uptime: (0.95 + Math.random() * 0.049).toFixed(3)
+      }
+    };
+  }
+
+  /**
+   * 生成代理能力雷达图数据
+   */
+  getAgentCapabilityRadar(agentId) {
+    const capabilities = Object.keys(AGENT_CAPABILITIES).slice(0, 6);
+    return capabilities.map(cap => ({
+      capability: AGENT_CAPABILITIES[cap].name,
+      current: Math.floor(Math.random() * 40) + 60,
+      potential: Math.floor(Math.random() * 20) + 80
+    }));
+  }
+
+  /**
+   * 生成收益分析数据
+   */
+  getEarningsAnalysis() {
+    // Generate daily earnings data for the past 14 days
+    const dailyEarnings = [];
+    const currentDate = new Date();
+    
+    for (let i = 13; i >= 0; i--) {
+      const date = new Date(currentDate);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      const totalEarnings = (Math.random() * 5 + 2).toFixed(2); // 2-7 ETH per day
+      const agentEarnings = (totalEarnings * (0.6 + Math.random() * 0.3)).toFixed(2); // 60-90% of total
+      
+      dailyEarnings.push({
+        date: dateStr,
+        totalEarnings: parseFloat(totalEarnings),
+        agentEarnings: parseFloat(agentEarnings)
+      });
+    }
+    
+    // Generate top earners data
+    const agentNames = ['Agent Alpha', 'Agent Beta', 'Agent Gamma', 'Agent Delta', 'Agent Echo'];
+    const topEarners = agentNames.map(agent => ({
+      agent,
+      earnings: (Math.random() * 20 + 10).toFixed(2) // 10-30 ETH total
+    })).sort((a, b) => parseFloat(b.earnings) - parseFloat(a.earnings));
+    
+    return {
+      dailyEarnings,
+      topEarners
+    };
+  }
+
+  /**
+   * 生成实时任务执行数据  
+   */
+  getRealTimeTaskExecution() {
+    const executions = [];
+    for (let i = 0; i < 3; i++) {
+      executions.push({
+        taskId: `task_${Math.random().toString(36).substring(2, 8)}`,
+        title: `AI Task ${i + 1}`,
+        agent: `Agent ${String.fromCharCode(65 + i)}`,
+        progress: Math.floor(Math.random() * 80) + 20,
+        currentStep: ['Analysis', 'Processing', 'Validation', 'Completion'][Math.floor(Math.random() * 4)]
+      });
+    }
+
+    return {
+      data: {
+        activeExecutions: executions,
+        queueMetrics: {
+          totalInQueue: Math.floor(Math.random() * 8) + 2,
+          avgWaitTime: Math.floor(Math.random() * 30) + 10,
+          throughputPerHour: Math.floor(Math.random() * 20) + 15
+        }
+      }
+    };
+  }
+
+  /**
+   * 生成代理性能数据
+   */
+  getAgentPerformanceData() {
+    const agents = [];
+    for (let i = 0; i < 6; i++) {
+      agents.push({
+        id: `agent_${i}`,
+        name: `Agent ${String.fromCharCode(65 + i)}`,
+        reputation: Math.floor(Math.random() * 30) + 70,
+        tasksCompleted: Math.floor(Math.random() * 50) + 10,
+        successRate: Math.floor(Math.random() * 20) + 80
+      });
+    }
+    return agents;
+  }
 }
 
 // 创建全局实例

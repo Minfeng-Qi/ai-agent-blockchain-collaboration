@@ -32,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { agentApi } from '../services/api';
+import { enhancedMockData } from '../services/enhancedMockData';
 
 const AgentCard = ({ agent, onDelete, onStatusToggle }) => {
   const navigate = useNavigate();
@@ -319,13 +320,25 @@ const AgentList = () => {
       }
     } catch (error) {
       console.error('Error fetching agents:', error);
-      setError('Failed to fetch agents from blockchain. Please check the API connection.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
       
-      // 不使用fallback数据，显示错误状态
-      setAgents([]);
-      setDataSource('error');
+      // 使用 mock data fallback
+      try {
+        console.log('Backend offline, using mock data for agents...');
+        const mockData = enhancedMockData.generateEnhancedAgents(12);
+        setAgents(mockData.agents);
+        setDataSource('mock');
+        setError('Backend offline - showing mock data');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+        console.log(`Successfully loaded ${mockData.agents.length} mock agents`);
+      } catch (mockError) {
+        console.error('Error generating mock agents:', mockError);
+        setError('Failed to fetch agents and mock data unavailable.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        setAgents([]);
+        setDataSource('error');
+      }
     } finally {
       setLoading(false);
     }
@@ -405,8 +418,16 @@ const AgentList = () => {
             Agents
           </Typography>
           <Chip 
-            label={dataSource === 'blockchain' ? 'Blockchain Data' : 'Local Data'}
-            color={dataSource === 'blockchain' ? 'success' : 'warning'}
+            label={
+              dataSource === 'blockchain' ? 'Blockchain Data' : 
+              dataSource === 'mock' ? 'Mock Data' : 
+              'Local Data'
+            }
+            color={
+              dataSource === 'blockchain' ? 'success' : 
+              dataSource === 'mock' ? 'warning' : 
+              'default'
+            }
             size="small"
             variant="outlined"
           />
