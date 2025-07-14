@@ -980,6 +980,25 @@ export const api = {
       throw error;
     }
   },
+
+  getTaskStatus: async (taskId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/status`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching task status ${taskId}:`, error);
+      if (USE_MOCK_DATA) {
+        console.log(`Using mock status data for task ${taskId}`);
+        return {
+          task_id: taskId,
+          status: 'assigned',
+          collaboration_progress: { percentage: 50, stage: 'Agents are collaborating...' },
+          message: 'Agents are working on this task. Please wait for completion...'
+        };
+      }
+      throw error;
+    }
+  },
   
   createTask: async (taskData) => {
     try {
@@ -1018,6 +1037,31 @@ export const api = {
     } catch (error) {
       console.error(`Error assigning task ${taskId} to agent ${agentId}:`, error);
       throw error;
+    }
+  },
+
+  smartAssignTask: async (taskId, collaborative = false, maxAgents = 3) => {
+    try {
+      console.log(`Making API call to smart-assign task ${taskId} with collaborative=${collaborative}, maxAgents=${maxAgents}`);
+      const response = await apiClient.post(`/tasks/${taskId}/smart-assign?collaborative=${collaborative}&max_agents=${maxAgents}`);
+      console.log(`Smart assign API response:`, response.data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error smart assigning task ${taskId}:`, error);
+      console.error('Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message
+      });
+      
+      // 如果是网络错误或后端不可用，抛出错误而不是使用fallback
+      if (error.code === 'ECONNREFUSED' || error.response?.status >= 500) {
+        throw new Error(`Backend service unavailable: ${error.message}`);
+      }
+      
+      // 对于其他错误，也抛出而不是使用fallback，这样前端能看到真实错误
+      throw new Error(error.response?.data?.detail || error.message || 'Failed to assign task');
     }
   },
   
@@ -1291,10 +1335,12 @@ export const agentApi = {
 export const taskApi = {
   getTasks: api.getTasks,
   getTaskById: api.getTaskById,
+  getTaskStatus: api.getTaskStatus,
   createTask: api.createTask,
   updateTask: api.updateTask,
   deleteTask: api.deleteTask,
   assignTask: api.assignTask,
+  smartAssignTask: api.smartAssignTask,
   completeTask: api.completeTask,
   startCollaboration: api.startCollaboration,
   getSuitableAgents: api.getSuitableAgents

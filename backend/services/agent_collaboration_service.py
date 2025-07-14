@@ -9,7 +9,19 @@ import uuid
 import time
 import asyncio
 from typing import Dict, List, Any, Optional, Tuple
-from openai import AsyncOpenAI
+
+# 兼容不同版本的OpenAI库
+try:
+    from openai import AsyncOpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    try:
+        import openai
+        OPENAI_AVAILABLE = True
+    except ImportError:
+        OPENAI_AVAILABLE = False
+        print("OpenAI library not available. Running in mock mode.")
+
 from .ipfs_service import ipfs_service
 from .contract_service import record_collaboration_ipfs, get_collaboration_record
 
@@ -25,21 +37,41 @@ class AgentCollaborationService:
         if not self.api_key:
             logger.warning("OpenAI API key not found. Agent collaboration will run in mock mode.")
         
-        # 设置模拟模式
-        mock_mode_env = os.environ.get('AGENT_MOCK_MODE', 'True')
-        self.mock_mode = mock_mode_env.lower() == 'true' if mock_mode_env else True
+        # 设置模拟模式 - 强制使用真实API进行测试
+        mock_mode_env = os.environ.get('AGENT_MOCK_MODE', 'False')
+        self.mock_mode = mock_mode_env.lower() == 'true' if mock_mode_env else False
+        logger.info(f"AGENT_MOCK_MODE env var: {mock_mode_env}, parsed mock_mode: {self.mock_mode}")
         
-        # 强制使用真实API如果有密钥
-        if self.api_key:
-            self.mock_mode = False
-            logger.info("OpenAI API key found. Using real API mode.")
+        # 检查OpenAI库可用性
+        if not OPENAI_AVAILABLE:
+            self.mock_mode = True
+            logger.warning("OpenAI library not available. Forcing mock mode.")
         
         # 设置默认使用的模型
         self.default_model = os.environ.get('OPENAI_DEFAULT_MODEL', 'gpt-3.5-turbo')
         
-        # 设置OpenAI客户端
-        if self.api_key:
-            self.openai_client = AsyncOpenAI(api_key=self.api_key)
+        # 强制使用真实API如果有密钥且库可用
+        if self.api_key and OPENAI_AVAILABLE:
+            self.mock_mode = False
+            logger.info("OpenAI API key found and library available. Using real API mode.")
+            logger.info(f"API Key (first 20 chars): {self.api_key[:20]}...")
+            logger.info(f"Default model: {self.default_model}")
+        
+        # 设置OpenAI/DeepSeek客户端
+        if self.api_key and OPENAI_AVAILABLE and 'AsyncOpenAI' in globals():
+            try:
+                # 检查是否使用DeepSeek API
+                base_url = os.environ.get('OPENAI_BASE_URL', None)
+                if base_url:
+                    self.openai_client = AsyncOpenAI(api_key=self.api_key, base_url=base_url)
+                    logger.info(f"AsyncOpenAI client initialized with custom base URL: {base_url}")
+                else:
+                    self.openai_client = AsyncOpenAI(api_key=self.api_key)
+                    logger.info("AsyncOpenAI client initialized with default URL.")
+            except Exception as e:
+                logger.error(f"Failed to initialize AsyncOpenAI client: {e}")
+                self.openai_client = None
+                self.mock_mode = True
         else:
             self.openai_client = None
     
@@ -101,20 +133,36 @@ class AgentCollaborationService:
             # 创建系统消息
             system_message = self._create_system_message(task_data, agents_info)
             
-            # 初始化对话
+            # Initialize conversation with enhanced collaboration
             conversation = [
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": f"任务: {task_data.get('title', '未知任务')}\n\n{task_data.get('description', '无描述')}"}
+                {"role": "user", "content": f"Task: {task_data.get('title', 'Unknown task')}\n\nDescription: {task_data.get('description', 'No description provided')}\n\nPlease begin your collaborative work to solve this task effectively."}
             ]
             
-            # 如果在模拟模式下，生成模拟对话
-            if self.mock_mode:
-                logger.info("Running in mock mode. Generating mock conversation.")
-                conversation = self._generate_mock_conversation(task_data, agents_info, conversation)
-            else:
-                # 如果不在模拟模式下，使用OpenAI API生成真实对话
-                logger.info("Running with real OpenAI API calls")
+            # 强制使用真实OpenAI API进行测试 - 完全跳过mock模式检查
+            logger.info(f"🔥 FORCE USING REAL OPENAI API - Mock mode check: self.mock_mode={self.mock_mode}, openai_client={self.openai_client is not None}")
+            
+            # 强制初始化OpenAI/DeepSeek客户端（如果未初始化）
+            if not self.openai_client and self.api_key:
+                try:
+                    from openai import AsyncOpenAI
+                    base_url = os.environ.get('OPENAI_BASE_URL', None)
+                    if base_url:
+                        self.openai_client = AsyncOpenAI(api_key=self.api_key, base_url=base_url)
+                        logger.info(f"🔧 DeepSeek client force-initialized successfully with URL: {base_url}")
+                    else:
+                        self.openai_client = AsyncOpenAI(api_key=self.api_key)
+                        logger.info("🔧 OpenAI client force-initialized successfully")
+                except Exception as e:
+                    logger.error(f"❌ Failed to force-initialize client: {e}")
+            
+            if self.openai_client and self.api_key:
+                # 强制使用真实OpenAI API
+                logger.info("🚀 FORCING REAL OpenAI API calls! No mock mode!")
                 conversation = await self._generate_real_conversation(task_data, agents_info, conversation)
+            else:
+                logger.error(f"❌ Cannot use real API: openai_client={self.openai_client is not None}, api_key_length={len(self.api_key) if self.api_key else 0}")
+                conversation = self._generate_mock_conversation(task_data, agents_info, conversation)
             
             # 将对话存储到IPFS
             conversation_data = {
@@ -288,58 +336,60 @@ class AgentCollaborationService:
         return agents
     
     def _create_system_message(self, task_data: Dict, agents: List[Dict]) -> str:
-        """创建系统消息"""
+        """Create system message for enhanced collaboration"""
         agents_info = "\n".join([
-            f"- 代理{i+1} ({agent['name']}): 专长于 {', '.join(agent['capabilities'])}, 声誉值: {agent['reputation']}"
+            f"- Agent{i+1} ({agent['name']}): Specializes in {', '.join(agent['capabilities'])}, Reputation: {agent['reputation']}"
             for i, agent in enumerate(agents)
         ])
         
-        system_message = f"""你将模拟多个AI代理之间的协作对话，共同解决一个任务。
-这些代理具有不同的专长和能力，需要相互协作以完成任务。
+        system_message = f"""You will simulate a collaborative conversation between multiple AI agents working together to solve a task.
+These agents have different specialties and capabilities, and need to collaborate effectively to complete the task.
 
-参与的代理:
+Participating Agents:
 {agents_info}
 
-任务详情:
-标题: {task_data.get('title', '未指定')}
-描述: {task_data.get('description', '未指定')}
-要求: {task_data.get('requirements', '未指定')}
+Task Details:
+Title: {task_data.get('title', 'Not specified')}
+Description: {task_data.get('description', 'Not specified')}
+Requirements: {task_data.get('requirements', 'Not specified')}
 
-请模拟这些代理之间的对话，展示它们如何协作解决这个任务。每个代理应该根据自己的专长贡献解决方案。
-对话应该包括:
-1. 任务分析和理解
-2. 工作分配
-3. 各代理执行各自部分
-4. 整合结果
-5. 最终解决方案
+Please simulate the conversation between these agents, showing how they collaborate to solve this task. Each agent should contribute solutions based on their expertise.
+The conversation should include:
+1. Task analysis and understanding
+2. Work distribution and coordination
+3. Each agent executing their assigned parts
+4. Result integration and quality review
+5. Final comprehensive solution
 
-当任务完成时，请明确标注"任务完成"并提供最终解决方案。"""
+When the task is completed, clearly indicate "Task Completed" and provide the final solution."""
         
         return system_message
     
     def _generate_mock_conversation(self, task_data: Dict, agents: List[Dict], conversation: List[Dict]) -> List[Dict]:
-        """生成模拟对话"""
+        """Generate enhanced mock conversation with better collaboration"""
         agent_names = [f"Agent{i+1} ({agent['name']})" for i, agent in enumerate(agents)]
         
         mock_responses = [
-            f"{agent_names[0]}: 我已分析任务要求，这是一个{task_data.get('type', '未知类型')}任务。我建议我们先理解需求，然后分配工作。",
+            f"{agent_names[0]}: I've analyzed the task requirements. This is a {task_data.get('type', 'general')} task. I suggest we first understand the requirements, then distribute the work among our team.",
             
-            f"{agent_names[1]}: 同意。根据任务描述，我们需要{task_data.get('description', '完成任务')}。我可以负责{agents[1]['capabilities'][0]}部分。",
+            f"{agent_names[1]}: Agreed. Based on the task description, we need to {task_data.get('description', 'complete the task')}. I can handle the {agents[1]['capabilities'][0]} portion using my expertise.",
             
-            f"{agent_names[0]}: 很好。我将处理{agents[0]['capabilities'][0]}。{agent_names[2] if len(agent_names) > 2 else agent_names[0]}，你能负责最终整合结果吗？",
+            f"{agent_names[0]}: Excellent. I'll handle the {agents[0]['capabilities'][0]} aspects. {agent_names[2] if len(agent_names) > 2 else agent_names[1]}, could you take responsibility for integrating our results?",
             
-            f"{agent_names[2] if len(agent_names) > 2 else agent_names[0]}: 没问题，我会负责整合大家的工作。让我们开始吧。\n\n{agent_names[0]}开始处理{agents[0]['capabilities'][0]}...\n\n初步结果: 已完成数据分析，发现以下模式...",
+            f"{agent_names[2] if len(agent_names) > 2 else agent_names[1]}: Absolutely, I'll coordinate the integration of everyone's work. Let's begin our collaborative effort.\n\n{agent_names[0]} is now processing {agents[0]['capabilities'][0]}...\n\nInitial findings: Completed analysis and discovered key patterns...",
             
-            f"{agent_names[1]}: 我已完成{agents[1]['capabilities'][0]}部分。结果如下: ...\n\n这些结果可以与{agent_names[0]}的发现结合。",
+            f"{agent_names[1]}: I've completed the {agents[1]['capabilities'][0]} component. Here are my results: The analysis shows significant insights that complement {agent_names[0]}'s findings. These can be effectively combined for a comprehensive solution.",
             
-            f"{agent_names[2] if len(agent_names) > 2 else agent_names[0]}: 感谢大家的贡献。我已经整合了所有结果。\n\n最终解决方案:\n1. {task_data.get('title', '任务')}已完成\n2. 我们通过协作解决了{task_data.get('description', '问题')}\n3. 具体实现包括...\n\n任务完成。"
+            f"{agent_names[0]}: Building on both of our work, I've identified several optimization opportunities. The data patterns suggest we should focus on three key areas for maximum impact.",
+            
+            f"{agent_names[2] if len(agent_names) > 2 else agent_names[0]}: Thank you all for your excellent contributions. I've successfully integrated all results.\n\nFinal Collaborative Solution:\n1. Task '{task_data.get('title', 'assigned task')}' has been completed successfully\n2. Our team collaboration has solved: {task_data.get('description', 'the problem')}\n3. Implementation includes comprehensive analysis, specialized processing, and integrated results\n4. Quality assurance confirms all requirements have been met\n\nTask completed through effective multi-agent collaboration."
         ]
         
-        # 添加模拟响应到对话中
+        # Add mock responses to conversation
         for i, response in enumerate(mock_responses):
             conversation.append({"role": "assistant", "content": response})
             if i < len(mock_responses) - 1:
-                conversation.append({"role": "user", "content": f"请继续讨论，直到解决任务。当前进度: {(i+1)*20}%"})
+                conversation.append({"role": "user", "content": f"Please continue the collaboration until the task is resolved. Current progress: {(i+1)*15}%"})
         
         return conversation
     
@@ -362,7 +412,11 @@ class AgentCollaborationService:
                 else:
                     modified_conversation.append(msg)
                 
-            response = openai.ChatCompletion.create(
+            # 使用新版本的异步OpenAI API
+            if not self.openai_client:
+                raise Exception("OpenAI client not initialized")
+            
+            response = await self.openai_client.chat.completions.create(
                 model=self.default_model,
                 messages=modified_conversation,
                 max_tokens=1500,
@@ -398,91 +452,134 @@ class AgentCollaborationService:
     
     async def _generate_real_conversation(self, task_data: Dict, agents_info: List[Dict], conversation: List[Dict]) -> List[Dict]:
         """
-        使用真实的OpenAI API生成多代理协作对话
+        Enhanced multi-agent collaboration with intelligent interaction using REAL OpenAI API
         """
         try:
-            # 为每个代理创建独立的对话上下文
-            agent_conversations = {}
-            for agent in agents_info:
-                agent_conversations[agent["agent_id"]] = conversation.copy()
+            logger.info("🎯 STARTING REAL CONVERSATION GENERATION WITH OPENAI API")
+            # Initialize agent collaboration state
+            collaboration_state = {
+                "task_progress": {},
+                "shared_context": {},
+                "agent_responses": [],
+                "collaboration_quality": 0
+            }
             
-            # 进行多轮对话，每轮让不同的代理响应
-            for round_num in range(5):
-                # 选择当前轮次的主要代理
+            # Enhanced conversation flow with better coordination
+            for round_num in range(3):  # Reduced rounds for faster testing
                 current_agent = agents_info[round_num % len(agents_info)]
                 agent_id = current_agent["agent_id"]
                 agent_name = current_agent["name"]
                 agent_caps = current_agent["capabilities"]
                 
-                # 创建代理特定的系统提示
-                agent_prompt = f"""你现在是{agent_name}，专长于{', '.join(agent_caps)}。
-你正在与其他代理协作完成任务。请根据你的专长贡献解决方案。
-任务: {task_data.get('title', '')}
-描述: {task_data.get('description', '')}
+                # Create context-aware agent prompt
+                collaboration_context = self._build_collaboration_context(
+                    collaboration_state, agents_info, round_num
+                )
+                
+                agent_prompt = f"""You are {agent_name}, specializing in {', '.join(agent_caps)}.
+You are collaborating with other agents to complete this task:
 
-当前进度: {(round_num + 1) * 20}%
+Task: {task_data.get('title', '')}
+Description: {task_data.get('description', '')}
+Progress: {(round_num + 1) * 14}%
 
-请以第一人称回应，展示你的专业能力和协作精神。
+{collaboration_context}
+
+Based on the above context and your expertise, please:
+1. Contribute your specialized knowledge
+2. Build upon other agents' work
+3. Ask questions if you need clarification
+4. Provide concrete, actionable solutions
+
+Respond as yourself, showing your professional expertise and collaborative spirit.
 """
                 
-                # 添加代理特定的提示
-                agent_conversation = agent_conversations[agent_id].copy()
+                # Get agent response
+                agent_conversation = conversation.copy()
                 agent_conversation.append({
                     "role": "user", 
                     "content": agent_prompt
                 })
                 
-                # 调用OpenAI API
                 response = await self._call_openai_api(agent_conversation)
                 
-                # 将响应添加到主对话中
+                # Format and add response
                 formatted_response = f"{agent_name}: {response}"
                 conversation.append({
                     "role": "assistant", 
                     "content": formatted_response
                 })
                 
-                # 更新所有代理的对话上下文
-                for aid in agent_conversations:
-                    agent_conversations[aid].append({
-                        "role": "assistant", 
-                        "content": formatted_response
+                # Update collaboration state
+                collaboration_state["agent_responses"].append({
+                    "agent": agent_name,
+                    "round": round_num,
+                    "response": response
+                })
+                
+                # Add coordination prompts every few rounds
+                if round_num == 3:
+                    coordination_prompt = "Let's coordinate our efforts. Please review what each agent has contributed so far and plan the next steps together."
+                    conversation.append({
+                        "role": "user", 
+                        "content": coordination_prompt
                     })
                 
-                # 添加一些延迟以避免API限制
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)  # Reduced sleep time
             
-            # 添加最终总结
-            summary_prompt = f"""请总结这次多代理协作的成果，确认任务已完成。
-任务: {task_data.get('title', '')}
-描述: {task_data.get('description', '')}
+            # Final integration and summary
+            integration_prompt = f"""Please provide a comprehensive summary of this multi-agent collaboration:
 
-请简要说明各代理的贡献和最终解决方案。
+Task: {task_data.get('title', '')}
+Description: {task_data.get('description', '')}
+
+Please include:
+1. Final integrated solution
+2. Each agent's key contributions
+3. How the collaboration enhanced the result
+4. Task completion confirmation
+
+Ensure the final result is complete, coherent, and actionable.
 """
             
             conversation.append({
                 "role": "user", 
-                "content": summary_prompt
+                "content": integration_prompt
             })
             
             final_response = await self._call_openai_api(conversation)
             conversation.append({
                 "role": "assistant", 
-                "content": f"协作总结: {final_response}"
+                "content": f"Collaboration Summary: {final_response}"
             })
             
             return conversation
             
         except Exception as e:
-            logger.error(f"Error in real conversation generation: {str(e)}")
-            # 如果API调用失败，回退到模拟模式
+            logger.error(f"Error in enhanced conversation generation: {str(e)}")
             return self._generate_mock_conversation(task_data, agents_info, conversation)
+    
+    def _build_collaboration_context(self, collaboration_state: Dict, agents_info: List[Dict], round_num: int) -> str:
+        """Build context for better agent collaboration"""
+        context = ""
+        
+        if round_num > 0:
+            context += "\nPrevious contributions from the team:\n"
+            recent_responses = collaboration_state["agent_responses"][-3:]  # Last 3 responses
+            for resp in recent_responses:
+                context += f"- {resp['agent']}: {resp['response'][:100]}...\n"
+        
+        if round_num >= 3:
+            context += f"\nWe are {round_num * 14}% through the task. Focus on building upon previous work and moving toward completion.\n"
+        
+        return context
     
     async def _call_openai_api(self, messages: List[Dict]) -> str:
         """
-        调用OpenAI API
+        调用OpenAI API（如果失败则使用智能模拟）
         """
         try:
+            logger.info(f"🔥 ATTEMPTING REAL OPENAI API CALL! Model: {self.default_model}")
             if not self.openai_client:
                 raise Exception("OpenAI client not initialized")
             
@@ -492,6 +589,7 @@ class AgentCollaborationService:
                 max_tokens=1000,
                 temperature=0.7
             )
+            logger.info(f"✅ OpenAI API call successful! Response length: {len(response.choices[0].message.content)}")
             
             return response.choices[0].message.content
             

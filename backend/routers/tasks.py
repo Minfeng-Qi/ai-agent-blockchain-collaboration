@@ -6,7 +6,7 @@ import logging
 import asyncio
 
 from services import contract_service
-from services.chatgpt_service import collaboration_service
+from services.agent_collaboration_service import agent_collaboration_service as collaboration_service
 from services.collaboration_db_service import collaboration_db_service
 from services.agent_selection_service import agent_selection_service
 
@@ -30,30 +30,198 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+@router.get("/debug/connection")
+async def debug_connection():
+    """
+    Debug endpoint to test connection status
+    """
+    logger.info("Debug connection endpoint called")
+    connection_status = contract_service.get_connection_status()
+    logger.info(f"Debug connection status: {connection_status}")
+    return {"status": "ok", "connection": connection_status}
+
+@router.get("/debug/task/{task_id}")
+async def debug_task(task_id: str):
+    """
+    Debug endpoint to test task retrieval
+    """
+    # Force initialization
+    if not contract_service.w3 or not contract_service.w3.is_connected():
+        contract_service.init_web3()
+        contract_service.initialize_contracts()
+    
+    # Debug contract status
+    debug_info = {
+        "w3_connected": contract_service.w3.is_connected() if contract_service.w3 else False,
+        "task_manager_contract_exists": contract_service.task_manager_contract is not None,
+    }
+    
+    # Test raw event filtering
+    collaboration_agents = []
+    all_events = []
+    try:
+        if contract_service.task_manager_contract:
+            # Get all collaboration events
+            try:
+                event_filter = contract_service.task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                    from_block='earliest',
+                    to_block='latest'
+                )
+            except TypeError:
+                event_filter = contract_service.task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                    fromBlock='earliest',
+                    toBlock='latest'
+                )
+            all_events = event_filter.get_all_entries()
+            debug_info["total_collaboration_events"] = len(all_events)
+            
+            # Get specific events for this task
+            task_id_bytes = bytes.fromhex(task_id)
+            try:
+                task_filter = contract_service.task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                    from_block='earliest',
+                    to_block='latest',
+                    argument_filters={'taskId': task_id_bytes}
+                )
+            except TypeError:
+                task_filter = contract_service.task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                    fromBlock='earliest',
+                    toBlock='latest',
+                    argument_filters={'taskId': task_id_bytes}
+                )
+            task_events = task_filter.get_all_entries()
+            debug_info["task_collaboration_events"] = len(task_events)
+            
+            if task_events:
+                collaboration_agents = list(task_events[-1]['args']['selectedAgents'])
+        
+    except Exception as e:
+        debug_info["error"] = str(e)
+    
+    # Get task directly from blockchain
+    result = contract_service.get_task(task_id)
+    
+    return {
+        "task_id": task_id,
+        "debug_info": debug_info,
+        "blockchain_result": result,
+        "collaboration_agents": collaboration_agents,
+        "collaboration_agents_count": len(collaboration_agents),
+        "all_events_count": len(all_events)
+    }
+
+async def auto_execute_collaboration(task_id: str, task_info: Dict[str, Any]):
+    """
+    自动执行agent协作的后台任务
+    """
+    try:
+        logger.info(f"🚀 Starting automatic collaboration for task {task_id}")
+        logger.info(f"📋 Task info: {task_info.get('title', 'Unknown')} - {task_info.get('type', 'unknown type')}")
+        
+        # 创建协作ID
+        collaboration_id = await collaboration_service.create_collaboration(task_id, task_info)
+        logger.info(f"✅ Created collaboration {collaboration_id} for task {task_id}")
+        
+        # 减少等待时间以便快速测试
+        logger.info(f"⏳ Preparing collaboration environment...")
+        await asyncio.sleep(3)  # 3秒准备时间
+        
+        # 运行协作
+        logger.info(f"🤖 Running agent collaboration for task {task_id}")
+        collaboration_result = await collaboration_service.run_collaboration(collaboration_id, task_info)
+        logger.info(f"📊 Collaboration result status: {collaboration_result.get('status')}")
+        logger.info(f"📄 Result summary: {collaboration_result.get('conversation', [{}])[-1].get('content', 'No content')[:200]}...")
+        
+        if collaboration_result.get("status") == "completed":
+            # 自动将任务状态更新为completed
+            logger.info(f"🎯 Collaboration completed successfully! Updating task status...")
+            await auto_complete_task(task_id, collaboration_result)
+            logger.info(f"✅ Task {task_id} automatically marked as completed")
+        else:
+            logger.warning(f"⚠️ Collaboration for task {task_id} failed or incomplete. Status: {collaboration_result.get('status')}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error in automatic collaboration for task {task_id}: {str(e)}")
+
+async def auto_complete_task(task_id: str, collaboration_result: Dict[str, Any]):
+    """
+    自动完成任务并更新状态
+    """
+    try:
+        logger.info(f"🔄 Auto-completing task {task_id}")
+        logger.info(f"📊 Result data: IPFS CID: {collaboration_result.get('ipfs_cid', 'N/A')}")
+        
+        # 检查区块链连接
+        connection_status = contract_service.get_connection_status()
+        
+        if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+            try:
+                # 获取发送者地址
+                sender_address = get_sender_address()
+                logger.info(f"🔗 Completing task on blockchain with sender: {sender_address}")
+                
+                # 调用合约服务完成任务
+                result = contract_service.complete_task(
+                    task_id=task_id,
+                    result_data=collaboration_result.get("ipfs_cid", ""),
+                    sender_address=sender_address
+                )
+                
+                if result["success"]:
+                    logger.info(f"✅ Task {task_id} completed on blockchain: {result['transaction_hash']}")
+                else:
+                    logger.warning(f"⚠️ Failed to complete task {task_id} on blockchain: {result.get('error')}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error completing task {task_id} on blockchain: {str(e)}")
+        
+        # 更新mock数据
+        logger.info(f"📝 Updating mock data for task {task_id}")
+        for task in mock_tasks:
+            if task["task_id"] == task_id:
+                task["status"] = "completed"
+                task["completed_at"] = datetime.now().isoformat()
+                task["result"] = collaboration_result.get("ipfs_cid", "")
+                logger.info(f"✅ Updated mock task {task_id} status to completed at {task['completed_at']}")
+                logger.info(f"📄 Task result stored: {task.get('result', 'No result')}")
+                break
+        else:
+            logger.warning(f"⚠️ Task {task_id} not found in mock_tasks list")
+                
+    except Exception as e:
+        logger.error(f"❌ Error auto-completing task {task_id}: {str(e)}")
+
 # 模拟数据
 mock_tasks = [
     {
         "task_id": "task_123",
         "title": "Analyze Customer Feedback",
+        "description": "Analyze customer feedback data to identify patterns and sentiment trends for product improvement",
         "type": "data_analysis",
         "status": "open",
         "reward": 0.5,
         "created_at": "2023-08-10T09:15:00Z",
-        "required_capabilities": ["data_analysis", "nlp"]
+        "deadline": "2025-08-20T23:59:59Z",
+        "required_capabilities": ["data_analysis", "nlp"],
+        "complexity": "medium",
+        "creator": "0x9876543210987654321098765432109876543210"
     },
     {
         "task_id": "task_456",
         "title": "Generate Product Descriptions",
+        "description": "Create compelling product descriptions for new e-commerce listings using AI collaboration",
         "type": "text_generation",
         "status": "assigned",
         "reward": 0.3,
         "created_at": "2023-08-11T14:22:00Z",
+        "assigned_at": datetime.now().isoformat(),
         "required_capabilities": ["text_generation"],
         "assigned_agent": "0x1234567890123456789012345678901234567890"
     },
     {
         "task_id": "task_789",
         "title": "Classify Images",
+        "description": "Classify product images into categories for better search and discovery",
         "type": "image_recognition",
         "status": "completed",
         "reward": 0.4,
@@ -61,6 +229,60 @@ mock_tasks = [
         "required_capabilities": ["image_recognition"],
         "assigned_agent": "0x2345678901234567890123456789012345678901",
         "completed_at": "2023-08-09T15:30:00Z"
+    },
+    {
+        "task_id": "task_999",
+        "title": "Test Agent Collaboration",
+        "description": "Test task for verifying multi-agent collaboration functionality with real data",
+        "type": "data_analysis",
+        "status": "open",
+        "reward": 0.8,
+        "created_at": "2025-07-14T15:00:00Z",
+        "deadline": "2025-08-20T23:59:59Z",
+        "required_capabilities": ["data_analysis", "nlp", "text_generation"],
+        "complexity": "high",
+        "creator": "0x9876543210987654321098765432109876543210"
+    },
+    {
+        "task_id": "task_888",
+        "title": "Real-time Agent Collaboration Test",
+        "description": "Demonstrate multi-agent collaboration with live agent selection and task assignment",
+        "type": "data_analysis",
+        "status": "open",
+        "reward": 1.0,
+        "created_at": "2025-07-14T16:00:00Z",
+        "deadline": "2025-08-25T23:59:59Z",
+        "required_capabilities": ["data_analysis", "nlp"],
+        "complexity": "medium",
+        "creator": "0x9876543210987654321098765432109876543210"
+    },
+    {
+        "task_id": "task_777",
+        "title": "Complete Workflow Test",
+        "description": "Test the complete workflow from open -> assigned -> completed with blockchain integration",
+        "type": "data_analysis",
+        "status": "assigned",
+        "reward": 1.5,
+        "created_at": "2025-07-14T17:00:00Z",
+        "deadline": "2025-08-30T23:59:59Z",
+        "required_capabilities": ["data_analysis", "text_generation"],
+        "complexity": "high",
+        "creator": "0x9876543210987654321098765432109876543210",
+        "assigned_agent": "0x1234567890123456789012345678901234567890",
+        "assigned_at": "2025-07-14T23:40:48.376203"
+    },
+    {
+        "task_id": "task_555",
+        "title": "Frontend Test Task",
+        "description": "Test task for frontend Start Agent Collaboration functionality",
+        "type": "data_analysis",
+        "status": "open",
+        "reward": 0.8,
+        "created_at": "2025-07-14T18:00:00Z",
+        "deadline": "2025-08-31T23:59:59Z",
+        "required_capabilities": ["data_analysis", "nlp"],
+        "complexity": "medium",
+        "creator": "0x9876543210987654321098765432109876543210"
     }
 ]
 
@@ -147,6 +369,11 @@ async def get_task(task_id: str):
     """
     获取特定任务的详细信息。
     """
+    # 强制初始化合约服务如果需要
+    if not contract_service.w3 or not contract_service.w3.is_connected():
+        contract_service.init_web3()
+        contract_service.initialize_contracts()
+    
     # 检查区块链连接
     connection_status = contract_service.get_connection_status()
     if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
@@ -157,6 +384,16 @@ async def get_task(task_id: str):
                 # 构建完整的任务信息
                 task_data = result.copy()
                 task_data["source"] = "blockchain"
+                
+                # 如果assigned_agents为空，强制重新获取
+                if not task_data.get("assigned_agents"):
+                    try:
+                        task_id_bytes = bytes.fromhex(task_id)
+                        collaboration_agents = contract_service.get_task_collaboration_agents(task_id_bytes)
+                        if collaboration_agents:
+                            task_data["assigned_agents"] = collaboration_agents
+                    except Exception as e:
+                        logger.warning(f"Failed to get collaboration agents for task {task_id}: {e}")
                 
                 return {"task": task_data}
             else:
@@ -306,7 +543,7 @@ async def assign_task(
     assignment: Dict[str, Any] = Body(...)
 ):
     """
-    将任务分配给代理。
+    将任务分配给代理并自动启动协作。
     """
     agent_id = assignment.get("agent_id")
     if not agent_id:
@@ -314,6 +551,8 @@ async def assign_task(
     
     # 检查区块链连接
     connection_status = contract_service.get_connection_status()
+    assignment_result = None
+    
     if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
         try:
             # 获取发送者地址（在实际应用中，这可能来自认证系统）
@@ -322,7 +561,7 @@ async def assign_task(
             # 调用合约服务分配任务
             result = contract_service.assign_task(task_id, agent_id, sender_address)
             if result["success"]:
-                return {
+                assignment_result = {
                     "success": True,
                     "task_id": task_id,
                     "agent_id": agent_id,
@@ -336,22 +575,157 @@ async def assign_task(
             logger.error(f"Error assigning task on blockchain: {str(e)}")
     
     # 如果区块链未连接或分配失败，使用模拟数据
-    for task in mock_tasks:
-        if task["task_id"] == task_id:
-            task["status"] = "assigned"
-            task["assigned_agent"] = agent_id
-            task["assigned_at"] = datetime.now().isoformat()
-            
-            return {
-                "success": True,
-                "task_id": task_id,
-                "agent_id": agent_id,
-                "transaction_hash": f"0x{uuid.uuid4().hex}",
-                "block_number": 123456,
-                "source": "mock"
-            }
+    if not assignment_result:
+        for task in mock_tasks:
+            if task["task_id"] == task_id:
+                task["status"] = "assigned"
+                task["assigned_agent"] = agent_id
+                task["assigned_at"] = datetime.now().isoformat()
+                
+                assignment_result = {
+                    "success": True,
+                    "task_id": task_id,
+                    "agent_id": agent_id,
+                    "transaction_hash": f"0x{uuid.uuid4().hex}",
+                    "block_number": 123456,
+                    "source": "mock"
+                }
+                break
     
-    raise HTTPException(status_code=404, detail="Task not found")
+    if not assignment_result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 自动启动agent协作
+    try:
+        logger.info(f"Starting automatic collaboration for task {task_id}")
+        
+        # 获取任务信息
+        task_info = None
+        if connection_status["connected"]:
+            task_result = contract_service.get_task(task_id)
+            if task_result["success"]:
+                task_info = task_result["task"]
+        
+        if not task_info:
+            # 使用mock数据
+            for task in mock_tasks:
+                if task["task_id"] == task_id:
+                    task_info = task
+                    break
+        
+        if task_info:
+            # 启动后台协作任务
+            asyncio.create_task(auto_execute_collaboration(task_id, task_info))
+            
+            assignment_result["collaboration_status"] = "started"
+            assignment_result["message"] = "Task assigned successfully. Agent collaboration is starting in the background."
+        
+    except Exception as e:
+        logger.error(f"Error starting automatic collaboration: {str(e)}")
+        assignment_result["collaboration_status"] = "failed"
+        assignment_result["message"] = "Task assigned successfully, but failed to start collaboration."
+    
+    return assignment_result
+
+@router.get("/{task_id}/status", response_model=Dict[str, Any])
+async def get_task_status(task_id: str):
+    """
+    获取任务的实时状态和协作进度
+    """
+    try:
+        # 检查区块链连接
+        connection_status = contract_service.get_connection_status()
+        task_info = None
+        
+        if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+            try:
+                task_result = contract_service.get_task(task_id)
+                if task_result["success"]:
+                    task_info = task_result["task"]
+            except Exception as e:
+                logger.error(f"Error getting task from blockchain: {str(e)}")
+        
+        # 如果区块链未连接或获取失败，使用模拟数据
+        if not task_info:
+            for task in mock_tasks:
+                if task["task_id"] == task_id:
+                    task_info = task
+                    break
+        
+        if not task_info:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        # 构建状态响应
+        status_response = {
+            "task_id": task_id,
+            "status": task_info.get("status", "unknown"),
+            "assigned_agent": task_info.get("assigned_agent"),
+            "assigned_at": task_info.get("assigned_at"),
+            "completed_at": task_info.get("completed_at"),
+            "collaboration_progress": get_collaboration_progress(task_info.get("status")),
+            "estimated_completion": get_estimated_completion_time(task_info.get("assigned_at")),
+            "message": get_status_message(task_info.get("status"))
+        }
+        
+        return status_response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+def get_collaboration_progress(status: str) -> Dict[str, Any]:
+    """获取协作进度信息"""
+    import time
+    
+    if status == "open":
+        return {"percentage": 0, "stage": "Waiting for assignment"}
+    elif status == "assigned":
+        # 模拟动态进度，基于当前时间
+        current_second = int(time.time()) % 60
+        if current_second < 10:
+            return {"percentage": 25, "stage": "Initializing agent collaboration..."}
+        elif current_second < 20:
+            return {"percentage": 40, "stage": "Agents analyzing task requirements..."}
+        elif current_second < 30:
+            return {"percentage": 55, "stage": "Agents working on task components..."}
+        elif current_second < 40:
+            return {"percentage": 70, "stage": "Agents collaborating and sharing results..."}
+        elif current_second < 50:
+            return {"percentage": 85, "stage": "Integrating collaborative results..."}
+        else:
+            return {"percentage": 95, "stage": "Finalizing collaboration output..."}
+    elif status == "completed":
+        return {"percentage": 100, "stage": "Task completed successfully"}
+    elif status == "failed":
+        return {"percentage": 0, "stage": "Task failed"}
+    else:
+        return {"percentage": 0, "stage": "Unknown status"}
+
+def get_estimated_completion_time(assigned_at: str) -> Optional[str]:
+    """获取预估完成时间"""
+    if not assigned_at:
+        return None
+    
+    try:
+        from datetime import datetime, timedelta
+        assigned_time = datetime.fromisoformat(assigned_at.replace('Z', '+00:00'))
+        # 假设协作需要1-2分钟完成（用于快速测试）
+        estimated_time = assigned_time + timedelta(minutes=1, seconds=30)
+        return estimated_time.isoformat()
+    except:
+        return None
+
+def get_status_message(status: str) -> str:
+    """获取状态消息"""
+    messages = {
+        "open": "Task is available for assignment",
+        "assigned": "Agents are working on this task. Please wait for completion...",
+        "completed": "Task has been completed successfully. You can now view the results.",
+        "failed": "Task execution failed. Please try reassigning or check the requirements."
+    }
+    return messages.get(status, "Unknown task status")
 
 @router.post("/{task_id}/complete", response_model=Dict[str, Any])
 async def complete_task(
@@ -1263,7 +1637,7 @@ async def smart_assign_task(
     max_agents: int = Query(3, ge=1, le=10, description="协作模式下最多选择的代理数量")
 ):
     """
-    智能分配任务给最合适的代理
+    智能分配任务给最合适的代理并自动启动协作
     """
     try:
         if collaborative:
@@ -1272,6 +1646,124 @@ async def smart_assign_task(
             result = await agent_selection_service.auto_assign_task(task_id)
             
         if result.get("success"):
+            # 更新任务状态为assigned并记录到区块链
+            try:
+                logger.info(f"Updating task {task_id} status to assigned and recording on blockchain")
+                
+                # 获取选中的代理
+                selected_agents = result.get("selected_agents", [])
+                if not selected_agents:
+                    raise Exception("No agents were selected")
+                
+                # 获取主要代理（通常是第一个或协调者）
+                primary_agent = selected_agents[0]
+                agent_address = primary_agent.get("agent_id")
+                
+                if not agent_address:
+                    # 如果agent_id为空，从agents API获取第一个可用的agent
+                    try:
+                        import requests
+                        agents_response = requests.get("http://localhost:8001/agents/", timeout=10)
+                        if agents_response.status_code == 200:
+                            agents_data = agents_response.json()
+                            agents_list = agents_data.get("agents", [])
+                            # 选择第一个active agent
+                            for agent in agents_list:
+                                if agent.get("active", True) and agent.get("agent_id"):
+                                    agent_address = agent["agent_id"]
+                                    logger.info(f"Using fallback agent: {agent_address} ({agent.get('name', 'Unknown')})")
+                                    break
+                    except Exception as e:
+                        logger.error(f"Error getting fallback agent: {str(e)}")
+                
+                if not agent_address:
+                    raise Exception("No valid agent address found for assignment")
+                
+                # 更新区块链上的任务状态
+                connection_status = contract_service.get_connection_status()
+                blockchain_updated = False
+                
+                if connection_status["connected"]:
+                    try:
+                        sender_address = get_sender_address()
+                        
+                        # 如果是协作任务，先启动collaboration（在任务还是Open状态时）
+                        logger.info(f"Checking collaboration condition: selected_agents count = {len(selected_agents)}")
+                        if len(selected_agents) > 1:
+                            try:
+                                # 生成协作ID
+                                collaboration_id = f"collab_{task_id}_{uuid.uuid4().hex[:8]}"
+                                
+                                # 获取所有选中代理的地址
+                                selected_agent_addresses = [
+                                    agent.get("agent_id") or f"0x{i:040x}" 
+                                    for i, agent in enumerate(selected_agents, 1)
+                                ]
+                                
+                                logger.info(f"Starting agent collaboration before task assignment...")
+                                # 启动agent collaboration（任务仍在Open状态）
+                                collab_result = contract_service.start_agent_collaboration(
+                                    task_id, 
+                                    selected_agent_addresses, 
+                                    collaboration_id,
+                                    sender_address
+                                )
+                                
+                                if collab_result.get("success"):
+                                    logger.info(f"Agent collaboration started for task {task_id}, collaboration_id: {collaboration_id}")
+                                    result["collaboration_id"] = collaboration_id
+                                    result["collaboration_transaction"] = collab_result.get("transaction_hash")
+                                else:
+                                    logger.warning(f"Failed to start agent collaboration: {collab_result.get('error')}")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error starting agent collaboration: {str(e)}")
+                        
+                        # 然后分配任务到区块链
+                        assign_result = contract_service.assign_task(task_id, agent_address, sender_address)
+                        if assign_result.get("success"):
+                            blockchain_updated = True
+                            logger.info(f"Task {task_id} successfully assigned to {agent_address} on blockchain")
+                            result["transaction_hash"] = assign_result.get("transaction_hash")
+                        else:
+                            logger.warning(f"Failed to assign task on blockchain: {assign_result.get('error')}")
+                    except Exception as e:
+                        logger.error(f"Error assigning task on blockchain: {str(e)}")
+                
+                # 更新mock数据中的任务状态
+                logger.info(f"Updating mock data for task {task_id}")
+                for task in mock_tasks:
+                    if task["task_id"] == task_id:
+                        task["status"] = "assigned"
+                        task["assigned_agent"] = agent_address
+                        task["assigned_at"] = datetime.now().isoformat()
+                        task["assigned_agents"] = [
+                            {
+                                "agent_id": agent.get("agent_id") or f"0x{i:040x}",
+                                "name": agent.get("name"),
+                                "role": agent.get("role"),
+                                "capabilities": agent.get("capabilities", []),
+                                "reputation": agent.get("reputation", 0),
+                                "match_score": agent.get("match_score", 0)
+                            }
+                            for i, agent in enumerate(selected_agents, 1)
+                        ]
+                        logger.info(f"Updated task {task_id} status to assigned with {len(selected_agents)} agents")
+                        break
+                
+                # 更新结果消息
+                result["status"] = "assigned"
+                result["assigned_agent"] = agent_address
+                result["assigned_agents"] = selected_agents
+                result["blockchain_updated"] = blockchain_updated
+                result["collaboration_status"] = "assigned"
+                result["message"] = f"Task successfully assigned to {len(selected_agents)} agent(s). Collaboration will begin shortly."
+                
+            except Exception as e:
+                logger.error(f"Error starting automatic collaboration for smart-assigned task: {str(e)}")
+                result["collaboration_status"] = "failed"
+                result["message"] = "Task smart-assigned successfully, but failed to start collaboration."
+            
             return result
         else:
             raise HTTPException(

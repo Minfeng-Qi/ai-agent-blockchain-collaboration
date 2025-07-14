@@ -133,3 +133,32 @@ async def get_conversation_by_ipfs(ipfs_cid: str):
     except Exception as e:
         logger.error(f"Error getting conversation from IPFS {ipfs_cid}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/test-openai")
+async def test_openai_connection():
+    """测试OpenAI API连接"""
+    try:
+        # 测试OpenAI客户端状态
+        service_status = {
+            "openai_client_available": agent_collaboration_service.openai_client is not None,
+            "mock_mode": agent_collaboration_service.mock_mode,
+            "api_key_configured": bool(agent_collaboration_service.api_key),
+            "api_key_length": len(agent_collaboration_service.api_key) if agent_collaboration_service.api_key else 0
+        }
+        
+        # 如果有真实API客户端，进行简单测试
+        if agent_collaboration_service.openai_client and not agent_collaboration_service.mock_mode:
+            try:
+                test_response = await agent_collaboration_service._call_openai_api([
+                    {"role": "user", "content": "Say 'OpenAI API connection successful' if you can read this."}
+                ])
+                service_status["openai_test_result"] = test_response[:100] + "..." if len(test_response) > 100 else test_response
+                service_status["openai_test_success"] = True
+            except Exception as e:
+                service_status["openai_test_result"] = f"Error: {str(e)}"
+                service_status["openai_test_success"] = False
+        
+        return service_status
+    except Exception as e:
+        logger.error(f"Error testing OpenAI connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

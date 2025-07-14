@@ -413,52 +413,66 @@ class AgentSelectionService:
             Dict: 分配结果
         """
         try:
-            import requests
+            from services import contract_service
             
-            # 通过API获取任务信息，避免循环调用
-            try:
-                task_response = requests.get(f"http://localhost:8001/tasks/{task_id}", timeout=10)
-                if task_response.status_code == 200:
-                    task_data = task_response.json()
-                    task = task_data.get("task")
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Failed to get task: HTTP {task_response.status_code}",
-                        "task_id": task_id
+            # 直接使用contract_service获取任务信息，避免API循环调用
+            task = None
+            connection_status = contract_service.get_connection_status()
+            
+            if connection_status["connected"]:
+                task_result = contract_service.get_task(task_id)
+                if task_result["success"]:
+                    # task_result already contains the task data, no need to access ["task"]
+                    task = {
+                        "task_id": task_result["task_id"],
+                        "title": task_result["title"],
+                        "description": task_result["description"],
+                        "required_capabilities": task_result["required_capabilities"],
+                        "min_reputation": task_result["min_reputation"],
+                        "reward": task_result["reward"],
+                        "status": task_result["status"],
+                        "creator": task_result["creator"],
+                        "deadline": task_result["deadline"]
                     }
-            except Exception as e:
-                return {
-                    "success": False,
-                    "error": f"Failed to get task via API: {str(e)}",
-                    "task_id": task_id
-                }
+            
+            # 如果区块链获取失败，尝试从mock数据获取
+            if not task:
+                from routers.tasks import mock_tasks
+                for mock_task in mock_tasks:
+                    if mock_task["task_id"] == task_id:
+                        task = mock_task
+                        break
             
             if not task:
                 return {
                     "success": False,
-                    "error": "Task not found or empty",
+                    "error": "Task not found",
                     "task_id": task_id
                 }
             
-            # 通过API获取所有代理
-            try:
-                agents_response = requests.get(f"http://localhost:8001/agents/", timeout=10)
-                if agents_response.status_code == 200:
-                    agents_data = agents_response.json()
-                    agents = agents_data.get("agents", [])
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Failed to get agents: HTTP {agents_response.status_code}",
-                        "task_id": task_id
-                    }
-            except Exception as e:
-                return {
-                    "success": False,
-                    "error": f"Failed to get agents via API: {str(e)}",
-                    "task_id": task_id
-                }
+            # 直接使用contract_service获取代理信息
+            agents = []
+            if connection_status["connected"]:
+                try:
+                    agents_result = contract_service.get_all_agents()
+                    if agents_result.get("success"):
+                        raw_agents = agents_result.get("agents", [])
+                        # 修复数据格式：将'address'字段映射为'agent_id'
+                        agents = []
+                        for agent in raw_agents:
+                            fixed_agent = agent.copy()
+                            if 'address' in agent and 'agent_id' not in agent:
+                                fixed_agent['agent_id'] = agent['address']
+                            agents.append(fixed_agent)
+                        logger.info(f"Successfully loaded {len(agents)} agents from blockchain")
+                except Exception as e:
+                    logger.warning(f"Failed to get agents from blockchain: {e}")
+                    agents = []
+            
+            # 如果区块链获取失败，使用mock数据
+            if not agents:
+                from routers.agents import mock_agents_data
+                agents = mock_agents_data.get("agents", [])
             
             # 选择协作代理
             selected_agents = await AgentSelectionService.select_collaborative_agents(task, agents, max_agents)
@@ -493,7 +507,7 @@ class AgentSelectionService:
                         "capabilities": agent.get("capabilities"),
                         "reputation": agent.get("reputation"),
                         "match_score": round(agent.get("score", 0) * 100, 2),
-                        "role": "协调者" if agent.get("agent_type") == 2 else "评估者" if agent.get("agent_type") == 3 else "执行者"
+                        "role": "Coordinator" if agent.get("agent_type") == 2 else "Evaluator" if agent.get("agent_type") == 3 else "Executor"
                     }
                     for agent in selected_agents
                 ],

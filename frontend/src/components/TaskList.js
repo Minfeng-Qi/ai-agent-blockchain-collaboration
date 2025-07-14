@@ -92,7 +92,7 @@ const TaskList = () => {
     fetchTasks();
   }, [agentFilter, tabValue]);
 
-  // 当页面重新获得焦点时刷新数据
+  // Refresh data when page regains focus
   useEffect(() => {
     const handleFocus = () => {
       fetchTasks();
@@ -132,7 +132,7 @@ const TaskList = () => {
       setError('Failed to fetch tasks. Using sample data instead.');
       setSnackbarOpen(true);
       
-      // 使用示例数据作为后备
+      // Use sample data as fallback
       const mockTasks = [
         {
           task_id: '1',
@@ -218,9 +218,9 @@ const TaskList = () => {
     setSnackbarOpen(false);
   };
   
-  // 根据搜索词过滤任务 - 排除已取消/删除的任务
+  // Filter tasks by search term - exclude cancelled/deleted tasks
   const filteredTasks = tasks.filter(task => {
-    // 首先过滤掉cancelled状态的任务
+    // First filter out cancelled status tasks
     if (task.status === 'cancelled' || task.status === 'canceled') {
       return false;
     }
@@ -232,14 +232,14 @@ const TaskList = () => {
     return titleMatch || descMatch || idMatch;
   });
   
-  // 分页任务
+  // Paginate tasks
   const paginatedTasks = filteredTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   
-  // 格式化日期
+  // Format date
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
     try {
-      // 如果是Unix timestamp (数字)，转换为毫秒
+      // If Unix timestamp (number), convert to milliseconds
       const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp);
       return date.toLocaleString();
     } catch (e) {
@@ -247,7 +247,7 @@ const TaskList = () => {
     }
   };
 
-  // 格式化Task ID - 只显示前8位和后4位
+  // Format Task ID - show only first 8 and last 4 characters
   const formatTaskId = (taskId) => {
     if (!taskId) return 'N/A';
     if (taskId.length <= 12) return taskId;
@@ -394,15 +394,50 @@ const TaskList = () => {
                         {formatDate(task.created_at)}
                       </TableCell>
                       <TableCell>
-                        <IconButton 
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/tasks/${task.task_id}`);
-                          }}
-                        >
-                          <MoreVertIcon fontSize="small" />
-                        </IconButton>
+                        {task.status === 'completed' ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/tasks/${task.task_id}/conversations`);
+                            }}
+                            sx={{ mr: 1 }}
+                          >
+                            View Result
+                          </Button>
+                        ) : task.status === 'open' ? (
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                // Smart assign the task (will trigger automatic collaboration)
+                                const response = await taskApi.smartAssignTask(task.task_id, true, 3);
+                                if (response.success) {
+                                  // Show success message and navigate to task details
+                                  navigate(`/tasks/${task.task_id}`);
+                                }
+                              } catch (error) {
+                                console.error('Error assigning task:', error);
+                              }
+                            }}
+                            sx={{ mr: 1 }}
+                          >
+                            Assign & Start
+                          </Button>
+                        ) : (
+                          <IconButton 
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/tasks/${task.task_id}`);
+                            }}
+                          >
+                            <MoreVertIcon fontSize="small" />
+                          </IconButton>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

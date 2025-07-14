@@ -25,7 +25,14 @@ import {
   DialogActions,
   TextField,
   Snackbar,
-  Alert
+  Alert,
+  LinearProgress,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  DialogContentText
 } from '@mui/material';
 import { 
   Assignment as AssignmentIcon,
@@ -53,12 +60,45 @@ const TaskDetails = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarSeverity, setSnackbarSeverity] = useState('warning');
+  const [taskStatus, setTaskStatus] = useState(null);
+  const [isPolling, setIsPolling] = useState(false);
+  const [assignmentResult, setAssignmentResult] = useState(null);
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false);
+  const [assignmentInProgress, setAssignmentInProgress] = useState(false);
   
   useEffect(() => {
     fetchTaskDetails();
   }, [taskId]);
 
-  // 当页面重新获得焦点时刷新数据（从其他页面返回时）
+  // 轮询任务状态，当任务处于assigned状态时
+  useEffect(() => {
+    if (task && task.status === 'assigned' && !isPolling) {
+      setIsPolling(true);
+      const interval = setInterval(async () => {
+        try {
+          const statusResponse = await taskApi.getTaskStatus(taskId);
+          setTaskStatus(statusResponse);
+          
+          // 如果任务完成，停止轮询并刷新任务详情
+          if (statusResponse.status === 'completed') {
+            clearInterval(interval);
+            setIsPolling(false);
+            fetchTaskDetails();
+          }
+        } catch (error) {
+          console.error('Error polling task status:', error);
+        }
+      }, 3000); // 每3秒轮询一次
+
+      return () => {
+        clearInterval(interval);
+        setIsPolling(false);
+      };
+    }
+  }, [task, taskId, isPolling]);
+
+  // Refresh data when page regains focus (when returning from other pages)
   useEffect(() => {
     const handleFocus = () => {
       fetchTaskDetails();
@@ -70,11 +110,11 @@ const TaskDetails = () => {
     };
   }, []);
   
-  // 格式化时间戳
+  // Format timestamp
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return 'N/A';
     try {
-      // 如果是Unix timestamp (数字)，转换为毫秒
+      // If Unix timestamp (number), convert to milliseconds
       const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp);
       return date.toLocaleString();
     } catch (e) {
@@ -95,6 +135,7 @@ const TaskDetails = () => {
     } catch (error) {
       console.error('Error fetching task details:', error);
       setError('Failed to fetch task details. Using sample data instead.');
+      setSnackbarSeverity('warning');
       setSnackbarOpen(true);
       
       // Mock data for development
@@ -149,6 +190,7 @@ const TaskDetails = () => {
       console.error('Error deleting task:', error);
       setDeleteDialogOpen(false);
       setError('Failed to delete task');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
   };
@@ -218,7 +260,7 @@ const TaskDetails = () => {
         onClose={handleSnackbarClose}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={handleSnackbarClose} severity="warning" sx={{ width: '100%' }}>
+        <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
           {error}
         </Alert>
       </Snackbar>
@@ -247,7 +289,7 @@ const TaskDetails = () => {
               onClick={() => navigate(`/tasks/${taskId}/conversations`)}
               startIcon={<ChatIcon />}
             >
-              View AI Conversations
+              View Result
             </Button>
           )}
           <Button 
@@ -602,10 +644,40 @@ const TaskDetails = () => {
                     )
                   )}
                 </List>
+                
+                {/* 进度指示器 */}
+                {taskStatus && (
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Collaboration Progress
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                      <Box sx={{ width: '100%', mr: 1 }}>
+                        <LinearProgress 
+                          variant="determinate" 
+                          value={taskStatus.collaboration_progress?.percentage || 0} 
+                          sx={{ height: 8, borderRadius: 4 }}
+                        />
+                      </Box>
+                      <Box sx={{ minWidth: 35 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          {taskStatus.collaboration_progress?.percentage || 0}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Typography variant="body2" color="textSecondary">
+                      {taskStatus.collaboration_progress?.stage || 'Processing...'}
+                    </Typography>
+                    <Typography variant="body2" color="primary" sx={{ mt: 1 }}>
+                      {taskStatus.message}
+                    </Typography>
+                  </Box>
+                )}
+                
                 <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
                   {task.assigned_agents?.length > 1 ? 
                     `${task.assigned_agents.length} agents collaborating on this task` : 
-                    'Ready to start AI conversation collaboration'
+                    'Agent collaboration in progress...'
                   }
                 </Typography>
               </Box>
@@ -655,7 +727,7 @@ const TaskDetails = () => {
                   </List>
                 )}
                 <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                  Task completed successfully. View AI conversations to see collaboration details.
+                  Task completed successfully. Click 'View Result' to see collaboration results.
                 </Typography>
               </Box>
             )}
@@ -676,11 +748,68 @@ const TaskDetails = () => {
                 <Button 
                   variant="contained" 
                   color="primary"
-                  onClick={() => navigate(`/tasks/${taskId}/start-collaboration`)}
+                  onClick={async () => {
+                    try {
+                      setLoading(true);
+                      setAssignmentInProgress(true);
+                      console.log('🚀 Starting smart agent collaboration for task:', taskId);
+                      console.log('🔧 Button clicked, calling taskApi.smartAssignTask...');
+                      const result = await taskApi.smartAssignTask(taskId, true, 4);
+                      console.log('✅ Smart assignment result:', result);
+                      
+                      if (result.success) {
+                        // 显示详细的分配结果
+                        setAssignmentResult(result);
+                        setAssignmentDialogOpen(true);
+                        
+                        // 根据结果状态显示不同消息
+                        const statusMessage = result.status === 'assigned' 
+                          ? `Task assigned successfully! ${result.message || 'Agents are now working on this task.'}`
+                          : `Agent collaboration started! ${result.message || 'Agents are now working on this task.'}`;
+                        
+                        setError(statusMessage);
+                        setSnackbarSeverity('success');
+                        setSnackbarOpen(true);
+                        
+                        // 立即刷新任务详情以显示新状态
+                        setTimeout(() => {
+                          fetchTaskDetails();
+                        }, 1000);
+                      } else {
+                        throw new Error(result.message || 'Failed to start collaboration');
+                      }
+                    } catch (error) {
+                      console.error('❌ Error starting collaboration:', error);
+                      console.error('❌ Error details:', {
+                        message: error.message,
+                        stack: error.stack,
+                        name: error.name
+                      });
+                      setError(`Failed to start collaboration: ${error.message}`);
+                      setSnackbarSeverity('error');
+                      setSnackbarOpen(true);
+                    } finally {
+                      setLoading(false);
+                      setAssignmentInProgress(false);
+                    }
+                  }}
                   startIcon={<GroupIcon />}
+                  disabled={loading}
                 >
-                  Start Agent Collaboration
+                  {loading ? 'Starting...' : 'Start Agent Collaboration'}
                 </Button>
+                
+                {assignmentInProgress && (
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+                    <Typography variant="body2" gutterBottom color="primary" fontWeight="medium">
+                      🤖 Analyzing task requirements and selecting agents...
+                    </Typography>
+                    <LinearProgress sx={{ mt: 1 }} />
+                    <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
+                      This may take a few seconds while we find the best agents for your task.
+                    </Typography>
+                  </Box>
+                )}
                 <Button 
                   variant="outlined" 
                   startIcon={<EditIcon />}
@@ -695,68 +824,276 @@ const TaskDetails = () => {
           {task.status === 'assigned' && (
             <Paper variant="outlined" sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Task Actions
+                Task Status
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Button 
-                  color="primary"
-                  variant="contained"
-                  startIcon={<ChatIcon />}
-                  onClick={async () => {
-                    try {
-                      const response = await taskApi.startRealCollaboration(taskId);
-                      if (response.success) {
-                        navigate(`/tasks/${taskId}/conversations/${response.conversation_id}`);
-                      }
-                    } catch (error) {
-                      console.error('Error starting real collaboration:', error);
-                      setError('Failed to start AI collaboration');
-                      setSnackbarOpen(true);
-                    }
-                  }}
-                >
-                  View AI Conversations
-                </Button>
-                <Button 
-                  variant="contained" 
-                  color="success"
-                  startIcon={<CheckCircleIcon />}
-                  onClick={async () => {
-                    try {
-                      await taskApi.completeTask(task.task_id, { status: 'completed' });
-                      fetchTaskDetails();
-                    } catch (error) {
-                      console.error('Error completing task:', error);
-                      setError('Failed to complete task');
-                      setSnackbarOpen(true);
-                    }
-                  }}
-                >
-                  Mark as Completed
-                </Button>
-                <Button 
-                  variant="contained" 
-                  color="error"
-                  startIcon={<CancelIcon />}
-                  onClick={async () => {
-                    try {
-                      await taskApi.completeTask(task.task_id, { status: 'failed' });
-                      fetchTaskDetails();
-                    } catch (error) {
-                      console.error('Error marking task as failed:', error);
-                      setError('Failed to update task status');
-                      setSnackbarOpen(true);
-                    }
-                  }}
-                >
-                  Mark as Failed
-                </Button>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Agents are actively working on this task!</strong>
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    The collaboration started automatically when the task was assigned. 
+                    You can monitor the progress above and wait for completion.
+                  </Typography>
+                </Alert>
+                
+                {taskStatus && taskStatus.estimated_completion && (
+                  <Typography variant="body2" color="textSecondary">
+                    <strong>Estimated completion:</strong> {new Date(taskStatus.estimated_completion).toLocaleString()}
+                  </Typography>
+                )}
+                
+                <Typography variant="body2" color="textSecondary">
+                  The task will automatically change to "Completed" status when agents finish their collaboration.
+                  You'll then be able to view the results.
+                </Typography>
+                
+                {/* Optional manual controls for debugging/testing */}
+                <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+                  <Typography variant="caption" color="textSecondary" gutterBottom>
+                    Manual Controls (for testing):
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button 
+                      size="small"
+                      variant="outlined" 
+                      color="success"
+                      startIcon={<CheckCircleIcon />}
+                      onClick={async () => {
+                        try {
+                          await taskApi.completeTask(task.task_id, { status: 'completed' });
+                          fetchTaskDetails();
+                        } catch (error) {
+                          console.error('Error completing task:', error);
+                          setError('Failed to complete task');
+                          setSnackbarSeverity('error');
+                          setSnackbarOpen(true);
+                        }
+                      }}
+                    >
+                      Force Complete
+                    </Button>
+                    <Button 
+                      size="small"
+                      variant="outlined" 
+                      color="error"
+                      startIcon={<CancelIcon />}
+                      onClick={async () => {
+                        try {
+                          await taskApi.completeTask(task.task_id, { status: 'failed' });
+                          fetchTaskDetails();
+                        } catch (error) {
+                          console.error('Error marking task as failed:', error);
+                          setError('Failed to update task status');
+                          setSnackbarSeverity('error');
+                          setSnackbarOpen(true);
+                        }
+                      }}
+                    >
+                      Force Fail
+                    </Button>
+                  </Box>
+                </Box>
               </Box>
             </Paper>
           )}
         </Grid>
       </Grid>
       
+      {/* Agent Assignment Result Dialog */}
+      <Dialog 
+        open={assignmentDialogOpen} 
+        onClose={() => setAssignmentDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <GroupIcon color="primary" />
+            Agent Collaboration Started
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {assignmentResult && (
+            <Box>
+              <DialogContentText sx={{ mb: 3 }}>
+                Task "{assignmentResult.task_title}" has been successfully assigned to {assignmentResult.selected_agents?.length || 0} agent(s). 
+                Here are the details of the selected team:
+              </DialogContentText>
+              
+              {/* Team Analysis Summary */}
+              <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+                <Typography variant="h6" gutterBottom>Team Analysis</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="textSecondary">Team Size</Typography>
+                    <Typography variant="h6">{assignmentResult.team_analysis?.team_size || 0}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="textSecondary">Capability Coverage</Typography>
+                    <Typography variant="h6" color={assignmentResult.team_analysis?.capability_coverage >= 80 ? 'success.main' : 'warning.main'}>
+                      {assignmentResult.team_analysis?.capability_coverage || 0}%
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="textSecondary">Average Reputation</Typography>
+                    <Typography variant="h6">{assignmentResult.team_analysis?.average_reputation || 0}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="textSecondary">Team Score</Typography>
+                    <Typography variant="h6">{assignmentResult.team_analysis?.team_score || 0}</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* Required vs Covered Capabilities */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle1" gutterBottom>Capability Requirements</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  <Typography variant="body2" color="textSecondary">Required:</Typography>
+                  {assignmentResult.required_capabilities?.map((cap, index) => (
+                    <Chip
+                      key={index}
+                      label={cap}
+                      size="small"
+                      color={assignmentResult.team_analysis?.covered_capabilities?.includes(cap) ? 'success' : 'default'}
+                      variant={assignmentResult.team_analysis?.covered_capabilities?.includes(cap) ? 'filled' : 'outlined'}
+                    />
+                  ))}
+                </Box>
+                {assignmentResult.team_analysis?.missing_capabilities?.length > 0 && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    <Typography variant="body2" color="error">Missing:</Typography>
+                    {assignmentResult.team_analysis.missing_capabilities.map((cap, index) => (
+                      <Chip
+                        key={index}
+                        label={cap}
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                      />
+                    ))}
+                  </Box>
+                )}
+              </Box>
+
+              {/* Selected Agents Table */}
+              <Typography variant="subtitle1" gutterBottom>Selected Agents</Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Agent</TableCell>
+                    <TableCell>Role</TableCell>
+                    <TableCell>Capabilities</TableCell>
+                    <TableCell align="right">Reputation</TableCell>
+                    <TableCell align="right">Match Score</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {assignmentResult.selected_agents?.map((agent, index) => (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Avatar sx={{ width: 24, height: 24, bgcolor: 'primary.main' }}>
+                            {agent.name?.charAt(0) || 'A'}
+                          </Avatar>
+                          <Typography variant="body2">{agent.name || 'Unknown Agent'}</Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={agent.role || 'Agent'} 
+                          size="small" 
+                          color={agent.agent_type === 2 ? 'primary' : 'default'}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                          {agent.capabilities?.slice(0, 3).map((cap, capIndex) => (
+                            <Chip
+                              key={capIndex}
+                              label={cap}
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontSize: '0.7rem', height: 20 }}
+                            />
+                          ))}
+                          {agent.capabilities?.length > 3 && (
+                            <Typography variant="caption" color="textSecondary">
+                              +{agent.capabilities.length - 3} more
+                            </Typography>
+                          )}
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography variant="body2" fontWeight="medium">
+                          {agent.reputation || 0}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography 
+                          variant="body2" 
+                          fontWeight="medium"
+                          color={agent.match_score >= 80 ? 'success.main' : agent.match_score >= 60 ? 'warning.main' : 'text.secondary'}
+                        >
+                          {agent.match_score || 0}%
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                <Typography variant="body2" color="success.dark">
+                  <strong>Status:</strong> {assignmentResult.message}
+                </Typography>
+                {assignmentResult.blockchain_updated && assignmentResult.transaction_hash && (
+                  <Typography variant="caption" color="success.dark" sx={{ mt: 1, display: 'block' }}>
+                    <strong>Blockchain Transaction:</strong> {assignmentResult.transaction_hash.substring(0, 10)}...
+                  </Typography>
+                )}
+                {assignmentResult.status === 'assigned' && (
+                  <Typography variant="caption" color="success.dark" sx={{ mt: 1, display: 'block' }}>
+                    ✅ Task status updated to "Assigned". The collaboration will continue until completion.
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssignmentDialogOpen(false)} variant="outlined">
+            Close
+          </Button>
+          {assignmentResult?.status === 'completed' ? (
+            <Button 
+              onClick={() => {
+                setAssignmentDialogOpen(false);
+                navigate(`/tasks/${taskId}/conversations`);
+              }}
+              variant="contained"
+              startIcon={<ChatIcon />}
+            >
+              View Results
+            </Button>
+          ) : (
+            <Button 
+              onClick={() => {
+                setAssignmentDialogOpen(false);
+                // 刷新页面状态
+                fetchTaskDetails();
+              }}
+              variant="contained"
+              color="primary"
+            >
+              Monitor Progress
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialogOpen}

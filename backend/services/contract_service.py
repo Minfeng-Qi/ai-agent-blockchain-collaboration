@@ -17,13 +17,13 @@ except ImportError:
 
 # 自动生成的合约地址 (checksum格式)
 contract_addresses = {
-    "AgentRegistry": "0x5F34e26Ec2f59d13EfA72a0fBF87CCD2Fa78Ac03",
-    "ActionLogger": "0x97623D91aaaFe4b57ed5f074570346b38eaeAcC9",
-    "IncentiveEngine": "0x7435315BA8095B30f592d2288dE558348faba3Da",
-    "TaskManager": "0xCD7CCef31AEFC470B2af0c4dDaB0f252EA32C127",
-    "BidAuction": "0xf098aD08F4BD8f980173ad721087bf4299efc374",
-    "MessageHub": "0x6B8e60414aCc0Ff3B8B4a568e449EA2765d37dcd",
-    "Learning": "0x7dE237B5944219d59412A707fE27CBD26f6F09cF",
+    "AgentRegistry": "0x0CA16C68e6bB6fcFc612aD99E9B3FB4E3727ACbd",
+    "ActionLogger": "0xb257f201B8d0014483EAf9749F7dF63c24C81A29",
+    "IncentiveEngine": "0x89f51B3945F025d44f0Fa0d065d376070AdA5d4D",
+    "TaskManager": "0x421a0D309ADE8515134fBFdA3F0F33846C450245",
+    "BidAuction": "0xac92E1F13A486c6981E72fBc438C3E137Ef82D2C",
+    "MessageHub": "0x9CD98A1c6BCA5e954D2AA7122733C20F657328ed",
+    "Learning": "0x6ed78454589Aa1251a90EABD7E773716189668b7",
 }
 
 # 配置
@@ -378,25 +378,42 @@ def get_task_collaboration_agents(task_id_bytes: bytes) -> List[str]:
     """
     从AgentCollaborationStarted事件中获取任务的所有分配agents
     """
+    logger.info(f"get_task_collaboration_agents called for task: {task_id_bytes.hex()}")
+    logger.info(f"task_manager_contract is initialized: {task_manager_contract is not None}")
+    
     if not task_manager_contract:
+        logger.warning("Task manager contract not initialized")
         return []
     
     try:
-        # 使用Web3.py 6.0.0兼容的事件过滤器
-        event_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
-            from_block='earliest',
-            to_block='latest',
-            argument_filters={'taskId': task_id_bytes}
-        )
+        # 使用Web3.py兼容的事件过滤器
+        try:
+            # Try new Web3.py parameter names first
+            event_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                from_block='earliest',
+                to_block='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        except TypeError:
+            # Fall back to old parameter names
+            event_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                fromBlock='earliest',
+                toBlock='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
         
         # 获取事件
         events = event_filter.get_all_entries()
+        logger.info(f"Found {len(events)} AgentCollaborationStarted events for task {task_id_bytes.hex()}")
         
         if events:
             # 返回最新事件的selectedAgents
             latest_event = events[-1]
-            return list(latest_event['args']['selectedAgents'])
+            selected_agents = list(latest_event['args']['selectedAgents'])
+            logger.info(f"Returning {len(selected_agents)} agents: {selected_agents}")
+            return selected_agents
         else:
+            logger.info("No events found, returning empty list")
             return []
     except Exception as e:
         logger.warning(f"Error getting collaboration agents for task {task_id_bytes.hex()}: {str(e)}")
@@ -438,9 +455,11 @@ def get_task(task_id: str) -> Dict[str, Any]:
         }
         
         # 获取协作agents（从AgentCollaborationStarted事件中）
+        logger.info(f"Getting collaboration agents for task {task_id}")
         assigned_agents = get_task_collaboration_agents(task_id_bytes)
+        logger.info(f"Got {len(assigned_agents)} collaboration agents for task {task_id}: {assigned_agents}")
         
-        return {
+        result = {
             "success": True,
             "task_id": task_id,
             "title": basic_info[1],
@@ -457,6 +476,9 @@ def get_task(task_id: str) -> Dict[str, Any]:
             "completed_at": execution_info[4] if execution_info[4] > 0 else None,
             "result": execution_info[5] if execution_info[5] else None
         }
+        
+        logger.info(f"Returning task result with {len(result['assigned_agents'])} assigned_agents")
+        return result
     except Exception as e:
         logger.error(f"Error getting task {task_id}: {str(e)}")
         return {"success": False, "error": str(e)}
@@ -631,7 +653,11 @@ def assign_task(task_id: str, agent_id: str, sender_address: str) -> Dict[str, A
         if task_id.startswith('0x'):
             task_id_bytes = bytes.fromhex(task_id[2:])
         else:
-            task_id_bytes = bytes.fromhex(task_id)
+            # 确保task_id是64字符的hex字符串，然后转换为32字节
+            if len(task_id) == 64:
+                task_id_bytes = bytes.fromhex(task_id)
+            else:
+                raise ValueError(f"Invalid task_id length: {len(task_id)}, expected 64 hex characters")
         
         # 调用合约方法
         tx_hash = task_manager_contract.functions.assignTask(task_id_bytes, agent_id).transact(tx_data)
@@ -691,7 +717,11 @@ def start_agent_collaboration(task_id: str, selected_agents: List[str], collabor
         if task_id.startswith('0x'):
             task_id_bytes = bytes.fromhex(task_id[2:])
         else:
-            task_id_bytes = bytes.fromhex(task_id)
+            # 确保task_id是64字符的hex字符串，然后转换为32字节
+            if len(task_id) == 64:
+                task_id_bytes = bytes.fromhex(task_id)
+            else:
+                raise ValueError(f"Invalid task_id length: {len(task_id)}, expected 64 hex characters")
         
         # 准备交易数据
         tx_data = {
