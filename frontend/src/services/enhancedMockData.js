@@ -955,6 +955,130 @@ class EnhancedMockDataGenerator {
     };
   }
 
+  /**
+   * 生成Agent学习数据（来自任务评估系统）
+   */
+  getAgentLearningData(agentId) {
+    const learningEvents = [];
+    const eventTypes = ['task_evaluation', 'task_completion', 'performance_feedback'];
+    
+    // 生成最近的学习事件（来自任务评估）
+    for (let i = 0; i < 10; i++) {
+      const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
+      const event = {
+        event_id: `learn_${Date.now()}_${i}`,
+        agent_id: agentId,
+        event_type: eventType,
+        timestamp: new Date(Date.now() - Math.random() * 30 * 86400000).toISOString(),
+        data: {
+          task_id: `task_${Math.random().toString(36).substring(2, 10)}`,
+          evaluation_result: Math.random() > 0.7 ? 'success' : 'failure',
+          rating: Math.floor(Math.random() * 5) + 1,
+          feedback: eventType === 'task_evaluation' ? 'User evaluated task' : 'System feedback',
+          reputation_change: (Math.random() - 0.5) * 10,
+          capability_improvements: this.generateCapabilityImprovements(),
+          score_change: (Math.random() - 0.5) * 0.5
+        },
+        source: 'evaluation_system'
+      };
+      learningEvents.push(event);
+    }
+
+    return {
+      agent_id: agentId,
+      learning_events: learningEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+      total: learningEvents.length,
+      source: 'enhanced_mock'
+    };
+  }
+
+  /**
+   * 生成能力改进数据
+   */
+  generateCapabilityImprovements() {
+    const capabilities = Object.keys(AGENT_CAPABILITIES);
+    const improvements = {};
+    
+    // 随机选择1-2个能力进行改进
+    const numImprovements = Math.floor(Math.random() * 2) + 1;
+    for (let i = 0; i < numImprovements; i++) {
+      const capability = capabilities[Math.floor(Math.random() * capabilities.length)];
+      improvements[capability] = {
+        previous_score: Math.random() * 100,
+        new_score: Math.random() * 100,
+        improvement: (Math.random() - 0.5) * 20
+      };
+    }
+    
+    return improvements;
+  }
+
+  /**
+   * 生成所有Agent的学习统计数据（用于Learning Dashboard）
+   */
+  getAgentLearningStatistics() {
+    const agents = this.generateEnhancedAgents(8).agents;
+    
+    const statistics = agents.map(agent => {
+      // 基于任务评估系统更新的数据
+      const recentEvaluations = Math.floor(Math.random() * 10) + 5;
+      const successfulEvaluations = Math.floor(recentEvaluations * (0.6 + Math.random() * 0.3));
+      
+      return {
+        agent_id: agent.agent_id,
+        agent_name: agent.name,
+        reputation: Math.floor(agent.reputation + (Math.random() - 0.5) * 10), // 评估系统更新后的声誉
+        average_score: agent.average_score + (Math.random() - 0.5) * 0.5, // 评估系统更新后的平均分
+        average_reward: agent.average_reward + (Math.random() - 0.5) * 0.2, // 评估系统更新后的平均奖励
+        tasks_completed: agent.tasks_completed + Math.floor(Math.random() * 5), // 新完成的任务
+        success_rate: ((successfulEvaluations / recentEvaluations) * 100).toFixed(1),
+        recent_evaluations: recentEvaluations,
+        successful_evaluations: successfulEvaluations,
+        failed_evaluations: recentEvaluations - successfulEvaluations,
+        capability_scores: this.generateUpdatedCapabilityScores(agent.capabilities),
+        learning_velocity: (Math.random() * 2 + 0.5).toFixed(2), // 学习速度
+        performance_trend: Math.random() > 0.6 ? 'improving' : (Math.random() > 0.3 ? 'stable' : 'declining'),
+        last_evaluation: new Date(Date.now() - Math.random() * 7 * 86400000).toISOString(),
+        total_learning_events: Math.floor(Math.random() * 20) + 10,
+        source: 'evaluation_system'
+      };
+    });
+
+    return {
+      agents: statistics,
+      summary: {
+        total_agents: statistics.length,
+        avg_reputation: (statistics.reduce((sum, a) => sum + a.reputation, 0) / statistics.length).toFixed(1),
+        avg_success_rate: (statistics.reduce((sum, a) => sum + parseFloat(a.success_rate), 0) / statistics.length).toFixed(1),
+        total_evaluations: statistics.reduce((sum, a) => sum + a.recent_evaluations, 0),
+        total_learning_events: statistics.reduce((sum, a) => sum + a.total_learning_events, 0),
+        performance_distribution: {
+          improving: statistics.filter(a => a.performance_trend === 'improving').length,
+          stable: statistics.filter(a => a.performance_trend === 'stable').length,
+          declining: statistics.filter(a => a.performance_trend === 'declining').length
+        }
+      },
+      timestamp: new Date().toISOString(),
+      source: 'enhanced_mock'
+    };
+  }
+
+  /**
+   * 生成更新后的能力分数
+   */
+  generateUpdatedCapabilityScores(capabilities) {
+    const scores = {};
+    capabilities.forEach(capability => {
+      scores[capability] = {
+        current_score: Math.floor(Math.random() * 30) + 70, // 70-100分
+        previous_score: Math.floor(Math.random() * 30) + 60, // 60-90分
+        improvement: Math.random() * 10 - 2, // -2到+8的改进
+        evaluation_count: Math.floor(Math.random() * 5) + 1
+      };
+    });
+    return scores;
+  }
+
   calculateOverallSuccessRate(tasks) {
     const completed = tasks.filter(t => t.status === 'completed').length;
     const total = tasks.filter(t => t.status !== 'open').length;

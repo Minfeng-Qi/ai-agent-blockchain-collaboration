@@ -26,7 +26,7 @@ import {
   ListItemAvatar,
   Fab
 } from '@mui/material';
-// Timeline 组件使用简单的替代方案，避免依赖 @mui/lab
+// Timeline component uses simple alternative to avoid @mui/lab dependency
 import {
   Chat as ChatIcon,
   Person as PersonIcon,
@@ -80,7 +80,7 @@ const ConversationViewer = () => {
     setLoading(true);
     try {
       const response = await taskApi.getTaskConversations(taskId);
-      // 如果有对话，显示第一个对话的详情
+      // If there are conversations, show details of the first conversation
       if (response.conversations && response.conversations.length > 0) {
         const firstConversation = response.conversations[0];
         navigate(`/tasks/${taskId}/conversations/${firstConversation.conversation_id}`);
@@ -100,7 +100,7 @@ const ConversationViewer = () => {
     try {
       const response = await taskApi.startRealCollaboration(taskId);
       if (response.success) {
-        // 跳转到新创建的对话
+        // Navigate to the newly created conversation
         navigate(`/tasks/${taskId}/conversations/${response.conversation_id}`);
       } else {
         throw new Error('Failed to start collaboration');
@@ -164,10 +164,10 @@ const ConversationViewer = () => {
       <Box sx={{ textAlign: 'center', py: 5 }}>
         <PsychologyIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
         <Typography variant="h6" color="textSecondary" gutterBottom>
-          No Agent Collaboration Found
+          No Task Results Available
         </Typography>
         <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
-          This task hasn't started agent collaboration yet.
+          This task hasn't been completed yet.
         </Typography>
         <Button 
           variant="contained" 
@@ -190,7 +190,7 @@ const ConversationViewer = () => {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h4" gutterBottom>
-            Agent Collaboration
+            Task Results
           </Typography>
           <Typography variant="subtitle1" color="textSecondary">
             Task: {conversation.task_description}

@@ -1,18 +1,8 @@
 // Smart Data Service - 智能数据服务
 // 自动检测后端状态并在真实数据和mock数据之间切换
 
-// import { enhancedMockData } from './enhancedMockData'; // 缺失，已注释
+import { enhancedMockData } from './enhancedMockData';
 import { api } from './api';
-
-// mock fallback for enhancedMockData
-const enhancedMockData = {
-  getNetworkActivityHeatmap: () => ({}),
-  getAgentCollaborationNetwork: () => ({}),
-  getQualityMetrics: () => ({}),
-  getPredictiveAnalytics: () => ({}),
-  getAgentCapabilityRadar: () => ({}),
-  getContractInteractions: () => ({}),
-};
 
 class SmartDataService {
   constructor() {
@@ -248,6 +238,16 @@ class SmartDataService {
   // 学习事件
   async getLearningEvents() {
     return this.getSmartData('/learning/events', 'getLearningEvents');
+  }
+
+  // 获取agent学习数据（评估系统生成的）
+  async getAgentLearningData(agentId) {
+    return this.getSmartData(`/agents/${agentId}/learning-events`, 'getAgentLearningData');
+  }
+
+  // 获取所有agent学习统计数据（用于Learning Dashboard）
+  async getAgentLearningStatistics() {
+    return this.getSmartData('/learning/agent-statistics', 'getAgentLearningStatistics');
   }
 
   // 网络活动热力图

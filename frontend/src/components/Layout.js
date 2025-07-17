@@ -31,7 +31,8 @@ import {
   Notifications as NotificationsIcon,
   AccountCircle as AccountCircleIcon,
   Psychology as PsychologyIcon,
-  Timeline as TimelineIcon
+  Timeline as TimelineIcon,
+  GroupWork as GroupWorkIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 

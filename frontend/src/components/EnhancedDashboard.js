@@ -46,9 +46,8 @@ import {
   AgentPerformanceRadar,
   EarningsChart 
 } from './charts';
-// import { enhancedMockData } from '../services/enhancedMockData'; // 缺失，已注释
+import { enhancedMockData } from '../services/enhancedMockData';
 import smartDataService from '../services/smartDataService';
-// import dataStorageService from '../services/dataStorageService'; // 缺失，已注释
 
 const EnhancedDashboard = () => {
   // 状态管理
@@ -78,7 +77,8 @@ const EnhancedDashboard = () => {
         smartDataService.getEarningsAnalysis(),
         smartDataService.getAgentCapabilityRadar('top_agent'),
         smartDataService.getAgentPerformanceData(),
-        smartDataService.getRealTimeMetrics()
+        smartDataService.getRealTimeMetrics(),
+        smartDataService.getAgentLearningStatistics()
       ]);
 
       // 处理结果，确保数据结构正确
@@ -86,7 +86,7 @@ const EnhancedDashboard = () => {
       const dataKeys = [
         'systemStatus', 'taskStatusDistribution', 'agentCapabilities',
         'taskCompletionTrend', 'earningsAnalysis', 'agentCapabilityRadar',
-        'agentPerformance', 'realTimeMetrics'
+        'agentPerformance', 'realTimeMetrics', 'agentLearningStatistics'
       ];
 
       let backendOnline = false;
@@ -110,28 +110,31 @@ const EnhancedDashboard = () => {
           // 使用fallback数据
           switch(key) {
             case 'systemStatus':
-              data[key] = null; // enhancedMockData.getSystemStatus();
+              data[key] = enhancedMockData.getSystemStatus();
               break;
             case 'taskStatusDistribution':
-              data[key] = null; // enhancedMockData.getTaskStatusDistribution();
+              data[key] = enhancedMockData.getTaskStatusDistribution();
               break;
             case 'agentCapabilities':
-              data[key] = null; // enhancedMockData.getAgentCapabilitiesDistribution();
+              data[key] = enhancedMockData.getAgentCapabilitiesDistribution();
               break;
             case 'taskCompletionTrend':
-              data[key] = null; // enhancedMockData.getTaskCompletionTrend();
+              data[key] = enhancedMockData.getTaskCompletionTrend();
               break;
             case 'earningsAnalysis':
-              data[key] = null; // enhancedMockData.getEarningsAnalysis();
+              data[key] = enhancedMockData.getEarningsAnalysis();
               break;
             case 'agentCapabilityRadar':
-              data[key] = null; // enhancedMockData.getAgentCapabilityRadar('top_agent');
+              data[key] = enhancedMockData.getAgentCapabilityRadar('top_agent');
               break;
             case 'agentPerformance':
-              data[key] = null; // enhancedMockData.getAgentPerformanceData();
+              data[key] = enhancedMockData.getAgentPerformanceData();
               break;
             case 'realTimeMetrics':
-              data[key] = null; // enhancedMockData.getRealTimeTaskExecution();
+              data[key] = enhancedMockData.getRealTimeTaskExecution();
+              break;
+            case 'agentLearningStatistics':
+              data[key] = enhancedMockData.getAgentLearningStatistics();
               break;
             default:
               data[key] = null;
@@ -151,14 +154,15 @@ const EnhancedDashboard = () => {
       setError('Failed to load dashboard data');
       // 完全fallback到mock数据
       const fallbackData = {
-        systemStatus: null, // enhancedMockData.getSystemStatus(),
-        taskStatusDistribution: null, // enhancedMockData.getTaskStatusDistribution(),
-        agentCapabilities: null, // enhancedMockData.getAgentCapabilitiesDistribution(),
-        taskCompletionTrend: null, // enhancedMockData.getTaskCompletionTrend(),
-        earningsAnalysis: null, // enhancedMockData.getEarningsAnalysis(),
-        agentCapabilityRadar: null, // enhancedMockData.getAgentCapabilityRadar('top_agent'),
-        agentPerformance: null, // enhancedMockData.getAgentPerformanceData(),
-        realTimeMetrics: null, // enhancedMockData.getRealTimeTaskExecution(),
+        systemStatus: enhancedMockData.getSystemStatus(),
+        taskStatusDistribution: enhancedMockData.getTaskStatusDistribution(),
+        agentCapabilities: enhancedMockData.getAgentCapabilitiesDistribution(),
+        taskCompletionTrend: enhancedMockData.getTaskCompletionTrend(),
+        earningsAnalysis: enhancedMockData.getEarningsAnalysis(),
+        agentCapabilityRadar: enhancedMockData.getAgentCapabilityRadar('top_agent'),
+        agentPerformance: enhancedMockData.getAgentPerformanceData(),
+        realTimeMetrics: enhancedMockData.getRealTimeTaskExecution(),
+        agentLearningStatistics: enhancedMockData.getAgentLearningStatistics(),
         isBackendOnline: false,
         lastUpdate: new Date().toISOString()
       };
@@ -576,6 +580,193 @@ const EnhancedDashboard = () => {
     );
   };
 
+  // 渲染学习仪表盘
+  const renderLearningDashboard = () => {
+    const learningData = dashboardData.agentLearningStatistics?.data || dashboardData.agentLearningStatistics;
+    if (!learningData || !learningData.agents) return null;
+
+    const { agents, summary } = learningData;
+
+    return (
+      <Card elevation={2} sx={{ mb: 4 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            <AssessmentIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+            Learning Dashboard
+            <Chip
+              size="small"
+              label="Updated by Evaluations"
+              color="primary"
+              variant="outlined"
+              sx={{ ml: 2 }}
+            />
+          </Typography>
+
+          {/* 学习摘要 */}
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="h4" color="primary.main">
+                  {summary.total_agents}
+                </Typography>
+                <Typography variant="caption">Active Agents</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="h4" color="success.main">
+                  {summary.avg_reputation}%
+                </Typography>
+                <Typography variant="caption">Avg Reputation</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="h4" color="info.main">
+                  {summary.avg_success_rate}%
+                </Typography>
+                <Typography variant="caption">Success Rate</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="h4" color="warning.main">
+                  {summary.total_evaluations}
+                </Typography>
+                <Typography variant="caption">Total Evaluations</Typography>
+              </Paper>
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ mb: 3 }} />
+
+          {/* Agent表现 */}
+          <Typography variant="subtitle1" gutterBottom>
+            Agent Performance (Updated by Task Evaluations)
+          </Typography>
+          
+          <Grid container spacing={2}>
+            {agents.slice(0, 6).map((agent, index) => (
+              <Grid item xs={12} sm={6} md={4} key={agent.agent_id || index}>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
+                >
+                  <Paper sx={{ p: 2, height: '100%' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <Avatar sx={{ mr: 1, bgcolor: 'primary.main' }}>
+                        {agent.agent_name?.charAt(0) || 'A'}
+                      </Avatar>
+                      <Box sx={{ flexGrow: 1 }}>
+                        <Typography variant="subtitle2" noWrap>
+                          {agent.agent_name || 'Unknown Agent'}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={agent.performance_trend}
+                          color={
+                            agent.performance_trend === 'improving' ? 'success' :
+                            agent.performance_trend === 'stable' ? 'primary' : 'warning'
+                          }
+                          variant="outlined"
+                        />
+                      </Box>
+                    </Box>
+                    
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Reputation: {agent.reputation}% 
+                        <Chip size="small" label={`+${agent.recent_evaluations} evals`} sx={{ ml: 1 }} />
+                      </Typography>
+                      <LinearProgress 
+                        variant="determinate" 
+                        value={agent.reputation} 
+                        sx={{ mt: 0.5, height: 6 }}
+                      />
+                    </Box>
+                    
+                    <Grid container spacing={1}>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Success Rate
+                        </Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          {agent.success_rate}%
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Avg Score
+                        </Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          {agent.average_score?.toFixed(1) || 'N/A'}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Tasks Done
+                        </Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          {agent.tasks_completed}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Avg Reward
+                        </Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          {agent.average_reward?.toFixed(2) || 'N/A'} ETH
+                        </Typography>
+                      </Grid>
+                    </Grid>
+
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      Last eval: {agent.last_evaluation ? new Date(agent.last_evaluation).toLocaleDateString() : 'N/A'}
+                    </Typography>
+                  </Paper>
+                </motion.div>
+              </Grid>
+            ))}
+          </Grid>
+
+          {/* 表现趋势 */}
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Performance Distribution
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CheckCircleIcon color="success" sx={{ mr: 1 }} />
+                  <Typography variant="body2">
+                    Improving: {summary.performance_distribution?.improving || 0}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <InfoIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="body2">
+                    Stable: {summary.performance_distribution?.stable || 0}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <WarningIcon color="warning" sx={{ mr: 1 }} />
+                  <Typography variant="body2">
+                    Declining: {summary.performance_distribution?.declining || 0}
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  };
+
   if (loading && !dashboardData.systemStatus) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -661,6 +852,9 @@ const EnhancedDashboard = () => {
 
       {/* Agent Performance Section */}
       {renderAgentPerformanceSection()}
+
+      {/* Learning Dashboard */}
+      {renderLearningDashboard()}
 
       {/* Real-Time Metrics */}
       {renderRealTimeMetrics()}

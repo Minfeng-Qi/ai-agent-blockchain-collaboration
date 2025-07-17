@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import TaskHistory from './TaskHistory';
 import { 
   Box, 
   Typography, 
@@ -32,7 +34,13 @@ import {
   TableBody,
   TableRow,
   TableCell,
-  DialogContentText
+  DialogContentText,
+  Rating,
+  FormControl,
+  FormLabel,
+  RadioGroup,
+  FormControlLabel,
+  Radio
 } from '@mui/material';
 import { 
   Assignment as AssignmentIcon,
@@ -63,9 +71,15 @@ const TaskDetails = () => {
   const [snackbarSeverity, setSnackbarSeverity] = useState('warning');
   const [taskStatus, setTaskStatus] = useState(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [resultDialogOpen, setResultDialogOpen] = useState(false);
+  const [collaborationResult, setCollaborationResult] = useState(null);
+  const [loadingResult, setLoadingResult] = useState(false);
   const [assignmentResult, setAssignmentResult] = useState(null);
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false);
   const [assignmentInProgress, setAssignmentInProgress] = useState(false);
+  const [evaluationDialogOpen, setEvaluationDialogOpen] = useState(false);
+  const [evaluationInProgress, setEvaluationInProgress] = useState(false);
+  const [evaluationResult, setEvaluationResult] = useState(null);
   
   useEffect(() => {
     fetchTaskDetails();
@@ -126,14 +140,46 @@ const TaskDetails = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('🔍 Fetching task details for ID:', taskId);
+      
+      // Force direct API call to bypass service monitor
+      const apiClient = axios.create({
+        baseURL: 'http://localhost:8001',
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('🚀 Making direct API call to /tasks/' + taskId);
+      const directResponse = await apiClient.get(`/tasks/${taskId}`);
+      console.log('📄 Direct API response:', directResponse.data);
+      
+      if (directResponse.data && directResponse.data.task) {
+        console.log('✅ Task data from direct API:', directResponse.data.task);
+        console.log('Task status:', directResponse.data.task.status);
+        console.log('Task result:', directResponse.data.task.result);
+        setTask(directResponse.data.task);
+        return; // Skip the regular API call
+      }
+      
+      // Fallback to regular API call
       const response = await taskApi.getTaskById(taskId);
+      console.log('📄 API response:', response);
+      
       if (response && response.task) {
+        console.log('✅ Task data:', response.task);
+        console.log('Task status:', response.task.status);
+        console.log('Task result:', response.task.result);
         setTask(response.task);
       } else {
+        console.error('❌ No task data in response:', response);
         throw new Error('Task data not found');
       }
     } catch (error) {
-      console.error('Error fetching task details:', error);
+      console.error('❌ Error fetching task details:', error);
+      console.error('Error details:', error.message);
+      console.error('Error stack:', error.stack);
       setError('Failed to fetch task details. Using sample data instead.');
       setSnackbarSeverity('warning');
       setSnackbarOpen(true);
@@ -174,6 +220,116 @@ const TaskDetails = () => {
       setTask(mockTask);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCollaborationResult = async () => {
+    console.log('🔍 fetchCollaborationResult called');
+    console.log('Task object:', task);
+    console.log('Task result:', task?.result);
+    
+    if (!task) {
+      setError('No task data available');
+      return;
+    }
+
+    if (!task.result) {
+      console.log('❌ No IPFS CID in task result field');
+      setError('No collaboration result available for this task');
+      return;
+    }
+
+    try {
+      setLoadingResult(true);
+      console.log('🚀 Fetching real IPFS data with CID:', task.result);
+      
+      // Force direct API call to bypass service monitor  
+      const apiClient = axios.create({
+        baseURL: 'http://localhost:8001',
+        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('🚀 Making direct API call to /collaboration/ipfs/' + task.result);
+      const cacheBuster = Date.now();
+      const directResponse = await apiClient.get(`/collaboration/ipfs/${task.result}?t=${cacheBuster}`);
+      console.log('✅ IPFS API response received');
+      console.log('📄 Response data:', JSON.stringify(directResponse.data, null, 2));
+      console.log('📋 Task title in response:', directResponse.data?.task_title);
+      console.log('🗣️ First conversation message:', directResponse.data?.conversation?.[0]?.content?.substring(0, 100));
+      
+      if (directResponse.data && directResponse.data.conversation) {
+        console.log('✅ Setting real IPFS collaboration result');
+        // Format the IPFS data to match expected structure
+        setCollaborationResult({
+          collaboration_id: directResponse.data.collaboration_id || `ipfs_${task.result}`,
+          task_id: directResponse.data.task_id || taskId,
+          task_title: directResponse.data.task_title || task.title,
+          agents: directResponse.data.agents || [],
+          conversation: directResponse.data.conversation || [],
+          result: null, // IPFS data doesn't have separate result field
+          api_mode: directResponse.data.api_mode || 'real',
+          ipfs_cid: task.result,
+          timestamp: directResponse.data.timestamp
+        });
+      } else {
+        console.error('❌ Invalid IPFS response structure:', directResponse.data);
+        setError('Invalid collaboration result format');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching IPFS collaboration result:', error);
+      console.error('Error details:', error.message);
+      console.error('Error response:', error.response?.data);
+      setError(`Failed to fetch collaboration result: ${error.message}`);
+    } finally {
+      setLoadingResult(false);
+    }
+  };
+
+  const handleViewResult = () => {
+    setResultDialogOpen(true);
+    fetchCollaborationResult();
+  };
+
+  const handleTaskEvaluation = async (success, rating = 5) => {
+    try {
+      setEvaluationInProgress(true);
+      console.log(`🎯 Evaluating task as ${success ? 'successful' : 'failed'} with rating ${rating}`);
+      
+      const evaluationData = {
+        task_id: taskId,
+        success: success,
+        rating: rating,
+        evaluator: 'user', // 用户手动评估
+        notes: success ? 'Task completed successfully by user evaluation' : 'Task marked as failed by user evaluation'
+      };
+      
+      const response = await taskApi.evaluateTask(taskId, evaluationData);
+      console.log('✅ Task evaluation result:', response);
+      
+      if (response.success) {
+        setEvaluationResult(response);
+        setError(`Task ${success ? 'completed' : 'failed'} successfully! Learning data updated.`);
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+        
+        // 刷新任务详情
+        setTimeout(() => {
+          fetchTaskDetails();
+        }, 1000);
+      } else {
+        throw new Error(response.message || 'Failed to evaluate task');
+      }
+    } catch (error) {
+      console.error('❌ Error evaluating task:', error);
+      setError(`Failed to evaluate task: ${error.message}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    } finally {
+      setEvaluationInProgress(false);
+      setEvaluationDialogOpen(false);
     }
   };
   
@@ -283,14 +439,24 @@ const TaskDetails = () => {
             Refresh
           </Button>
           {task.status === 'completed' && (
-            <Button 
-              variant="outlined" 
-              color="info"
-              onClick={() => navigate(`/tasks/${taskId}/conversations`)}
-              startIcon={<ChatIcon />}
-            >
-              View Result
-            </Button>
+            <>
+              <Button 
+                variant="outlined" 
+                color="info"
+                onClick={handleViewResult}
+                startIcon={<ChatIcon />}
+              >
+                View Result
+              </Button>
+              <Button 
+                variant="outlined" 
+                color="success"
+                onClick={() => setEvaluationDialogOpen(true)}
+                startIcon={<CheckCircleIcon />}
+              >
+                Evaluate Task
+              </Button>
+            </>
           )}
           <Button 
             variant="outlined" 
@@ -516,34 +682,8 @@ const TaskDetails = () => {
             )}
           </Paper>
           
-          <Paper variant="outlined" sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Task History
-            </Typography>
-            {task.history && task.history.length > 0 ? (
-              <List dense>
-                {task.history.map((event, index) => (
-                  <ListItem key={index}>
-                    <ListItemIcon>
-                      {event.event === 'created' && <AssignmentIcon color="primary" />}
-                      {event.event === 'bid' && <AttachMoneyIcon color="secondary" />}
-                      {event.event === 'assigned' && <PersonIcon color="warning" />}
-                      {event.event === 'completed' && <CheckCircleIcon color="success" />}
-                      {event.event === 'failed' && <CancelIcon color="error" />}
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary={event.details}
-                      secondary={new Date(event.timestamp * 1000).toLocaleString()}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
-              <Typography variant="body2" color="textSecondary">
-                No history available
-              </Typography>
-            )}
-          </Paper>
+          {/* Task History with Real Blockchain Data */}
+          <TaskHistory taskId={task.task_id} />
         </Grid>
         
         <Grid item xs={12} md={4}>
@@ -1111,6 +1251,237 @@ const TaskDetails = () => {
           </Button>
           <Button onClick={handleDeleteTask} color="error" variant="contained">
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Collaboration Result Dialog */}
+      <Dialog
+        open={resultDialogOpen}
+        onClose={() => setResultDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center">
+            <ChatIcon sx={{ mr: 1 }} />
+            Collaboration Result
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {loadingResult ? (
+            <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+              <CircularProgress />
+              <Typography variant="body2" sx={{ ml: 2 }}>
+                Loading collaboration result...
+              </Typography>
+            </Box>
+          ) : collaborationResult ? (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Task: {collaborationResult.task_title}
+              </Typography>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                Collaboration ID: {collaborationResult.collaboration_id}
+              </Typography>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                Agents: {collaborationResult.agents?.length || 0} participants
+              </Typography>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                API Mode: {collaborationResult.api_mode || 'real'}
+              </Typography>
+              
+              {collaborationResult.ipfs_cid && (
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  IPFS CID: {collaborationResult.ipfs_cid}
+                </Typography>
+              )}
+              
+              {collaborationResult.timestamp && (
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  Completed: {new Date(collaborationResult.timestamp * 1000).toLocaleString()}
+                </Typography>
+              )}
+              
+              <Divider sx={{ my: 2 }} />
+              
+              <Typography variant="h6" gutterBottom>
+                Conversation:
+              </Typography>
+              
+              {collaborationResult.conversation && collaborationResult.conversation.length > 0 ? (
+                <Box sx={{ maxHeight: '400px', overflow: 'auto' }}>
+                  {collaborationResult.conversation.map((message, index) => (
+                    <Card key={index} sx={{ mb: 2 }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="subtitle2" color="primary">
+                            {message.sender_address === 'system' ? 'System' : 
+                             message.sender_address === 'user' ? 'User' : 
+                             message.agent_name || `Agent ${message.sender_address?.substring(0, 8)}...`}
+                          </Typography>
+                          {message.timestamp && (
+                            <Typography variant="caption" color="textSecondary">
+                              {new Date(message.timestamp).toLocaleString()}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
+                          {message.content}
+                        </Typography>
+                        {message.round_number && (
+                          <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
+                            Round {message.round_number}
+                          </Typography>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="textSecondary">
+                  No conversation data available
+                </Typography>
+              )}
+              
+              <Divider sx={{ my: 2 }} />
+              
+              {collaborationResult.result && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Final Result:
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                      {typeof collaborationResult.result === 'string' 
+                        ? collaborationResult.result 
+                        : collaborationResult.result?.final_result || 'No final result available'}
+                    </Typography>
+                  </Paper>
+                  
+                  {collaborationResult.result?.conversation_summary && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Summary:
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {collaborationResult.result.conversation_summary}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              )}
+              
+              <Typography variant="caption" color="textSecondary">
+                {task.result ? `IPFS CID: ${task.result}` : 'Source: Database/API'}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography variant="body2" color="textSecondary">
+              No collaboration result available
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResultDialogOpen(false)}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Task Evaluation Dialog */}
+      <Dialog
+        open={evaluationDialogOpen}
+        onClose={() => setEvaluationDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CheckCircleIcon color="success" />
+            Evaluate Task Completion
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Task: {task.title}
+            </Typography>
+            <Typography variant="body2" color="textSecondary" gutterBottom>
+              Please evaluate how well the agents completed this task. This will update their learning data and reputation.
+            </Typography>
+            
+            <FormControl component="fieldset" sx={{ mt: 3 }}>
+              <FormLabel component="legend">Task Outcome</FormLabel>
+              <RadioGroup
+                defaultValue="success"
+                name="task-outcome"
+              >
+                <FormControlLabel 
+                  value="success" 
+                  control={<Radio />} 
+                  label="✅ Task Completed Successfully - Agents performed well" 
+                />
+                <FormControlLabel 
+                  value="failed" 
+                  control={<Radio />} 
+                  label="❌ Task Failed - Agents did not meet expectations" 
+                />
+              </RadioGroup>
+            </FormControl>
+            
+            <Box sx={{ mt: 3 }}>
+              <Typography component="legend">Overall Quality Rating</Typography>
+              <Rating
+                name="task-rating"
+                defaultValue={4}
+                precision={1}
+                size="large"
+                sx={{ mt: 1 }}
+              />
+              <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+                This rating will affect agent reputation and learning
+              </Typography>
+            </Box>
+
+            {task.assigned_agents && task.assigned_agents.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Participating Agents:
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {task.assigned_agents.map((agent, index) => (
+                    <Chip
+                      key={agent}
+                      label={`Agent ${index + 1}: ${formatAddress(agent)}`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setEvaluationDialogOpen(false)}
+            disabled={evaluationInProgress}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={() => {
+              const outcome = document.querySelector('input[name="task-outcome"]:checked')?.value || 'success';
+              const rating = document.querySelector('input[name="task-rating"]')?.value || 4;
+              handleTaskEvaluation(outcome === 'success', parseInt(rating));
+            }}
+            variant="contained"
+            color="success"
+            disabled={evaluationInProgress}
+            startIcon={evaluationInProgress ? <CircularProgress size={20} /> : <CheckCircleIcon />}
+          >
+            {evaluationInProgress ? 'Evaluating...' : 'Submit Evaluation'}
           </Button>
         </DialogActions>
       </Dialog>

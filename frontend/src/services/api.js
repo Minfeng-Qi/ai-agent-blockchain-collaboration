@@ -809,7 +809,7 @@ export const api = {
   
   getConversationByIpfs: async (ipfsCid) => {
     try {
-      const response = await apiClient.get(`/collaboration/collaboration/ipfs/${ipfsCid}`);
+      const response = await apiClient.get(`/collaboration/ipfs/${ipfsCid}`);
       return response.data;
     } catch (error) {
       console.error(`Error fetching conversation from IPFS ${ipfsCid}:`, error);
@@ -1071,6 +1071,87 @@ export const api = {
       return response.data;
     } catch (error) {
       console.error(`Error completing task ${taskId}:`, error);
+      throw error;
+    }
+  },
+
+  evaluateTask: async (taskId, evaluationData) => {
+    try {
+      const response = await apiClient.post(`/tasks/${taskId}/evaluate`, evaluationData);
+      return response.data;
+    } catch (error) {
+      console.error(`Error evaluating task ${taskId}:`, error);
+      throw error;
+    }
+  },
+
+  // 获取agent学习事件（来自评估系统）
+  getAgentLearningEvents: async (agentId) => {
+    try {
+      const response = await apiClient.get(`/agents/${agentId}/learning-events`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching learning events for agent ${agentId}:`, error);
+      throw error;
+    }
+  },
+
+  // 获取学习统计数据（用于Learning Dashboard）
+  getAgentLearningStatistics: async () => {
+    try {
+      const response = await apiClient.get('/learning/agent-statistics');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching agent learning statistics:', error);
+      throw error;
+    }
+  },
+
+  getTaskHistory: async (taskId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/history`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching task history for ${taskId}:`, error);
+      if (USE_MOCK_DATA) {
+        console.log(`Using mock history data for task ${taskId}`);
+        return {
+          success: true,
+          data: {
+            task_id: taskId,
+            history: [
+              {
+                type: 'task_created',
+                title: 'Task Created',
+                timestamp: 1,
+                description: 'Task created by user',
+                details: {
+                  creator: '0x1234...5678',
+                  task_id: taskId,
+                  transaction_hash: '0xabcd...efgh',
+                  block_number: 1,
+                  gas_used: 100000
+                },
+                icon: '📅'
+              },
+              {
+                type: 'task_assigned',
+                title: 'Task Assigned',
+                timestamp: 2,
+                description: 'Task assigned to agent',
+                details: {
+                  agent: '0x5678...9abc',
+                  transaction_hash: '0xefgh...ijkl',
+                  block_number: 2,
+                  gas_used: 80000
+                },
+                icon: '⚡'
+              }
+            ],
+            total_events: 2
+          }
+        };
+      }
       throw error;
     }
   },
@@ -1336,12 +1417,14 @@ export const taskApi = {
   getTasks: api.getTasks,
   getTaskById: api.getTaskById,
   getTaskStatus: api.getTaskStatus,
+  getTaskHistory: api.getTaskHistory,
   createTask: api.createTask,
   updateTask: api.updateTask,
   deleteTask: api.deleteTask,
   assignTask: api.assignTask,
   smartAssignTask: api.smartAssignTask,
   completeTask: api.completeTask,
+  evaluateTask: api.evaluateTask,
   startCollaboration: api.startCollaboration,
   getSuitableAgents: api.getSuitableAgents
 };
