@@ -74,12 +74,14 @@ check_command "curl"
 check_command "jq"
 check_command "python3"
 check_command "npm"
+check_command "ipfs"
 success_msg "工具检查通过"
 
 # 1. 停止现有后端服务
 echo -e "${BLUE}🛑 停止现有后端服务...${NC}"
 pkill -f "uvicorn.*backend" 2>/dev/null || true
 pkill -f "uvicorn.*main:app" 2>/dev/null || true
+pkill -f "ipfs daemon" 2>/dev/null || true
 sleep 2
 success_msg "现有服务已停止"
 
@@ -203,17 +205,35 @@ python -m py_compile services/contract_service.py || error_exit "contract_servic
 python -m py_compile main.py || error_exit "main.py语法错误"
 success_msg "Python文件语法验证通过"
 
-# 9. 启动后端API服务
+# 9. 启动IPFS守护进程
+echo -e "${BLUE}🗂️  启动IPFS守护进程...${NC}"
+
+# 检查IPFS是否已初始化
+if [ ! -d "$HOME/.ipfs" ]; then
+    info_msg "初始化IPFS..."
+    ipfs init || error_exit "IPFS初始化失败"
+fi
+
+# 启动IPFS守护进程
+nohup ipfs daemon > ipfs.log 2>&1 &
+IPFS_PID=$!
+echo "$IPFS_PID" > ipfs.pid
+success_msg "IPFS守护进程已启动 (PID: $IPFS_PID)"
+
+# 等待IPFS启动
+wait_for_service "http://localhost:5001/api/v0/version" 10 "IPFS"
+
+# 10. 启动后端API服务
 echo -e "${BLUE}🔧 启动后端API服务...${NC}"
 nohup python -m uvicorn main:app --host 127.0.0.1 --port 8001 --reload > backend.log 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID" > backend.pid
 success_msg "后端服务已启动 (PID: $BACKEND_PID)"
 
-# 10. 等待后端启动并验证
+# 11. 等待后端启动并验证
 wait_for_service "http://localhost:8001/health" 15 "后端"
 
-# 11. 验证区块链连接
+# 12. 验证区块链连接
 echo -e "${BLUE}🔍 验证区块链连接...${NC}"
 HEALTH_STATUS=$(curl -s http://localhost:8001/health)
 BLOCKCHAIN_STATUS=$(echo "$HEALTH_STATUS" | jq -r '.services.blockchain' 2>/dev/null)
@@ -225,13 +245,15 @@ else
     echo "健康状态: $HEALTH_STATUS"
 fi
 
-# 12. 显示启动完成信息
+# 13. 显示启动完成信息
 echo ""
 echo -e "${GREEN}🎉 后端系统启动完成！${NC}"
 echo "=========================================="
 echo -e "${BLUE}📊 服务信息:${NC}"
 echo "  🔗 外部Ganache: http://localhost:8545"
 echo "  🔧 后端API: http://localhost:8001"
+echo "  🗂️  IPFS节点: http://localhost:5001"
+echo "  🌐 IPFS网关: http://localhost:8080"
 echo "  📚 API文档: http://localhost:8001/docs"
 echo ""
 echo -e "${BLUE}📋 合约地址:${NC}"
@@ -245,16 +267,20 @@ echo "  Learning: $LEARNING"
 echo ""
 echo -e "${BLUE}🛠️  管理命令:${NC}"
 echo "  停止后端: pkill -f 'uvicorn.*main:app'"
-echo "  查看日志: tail -f backend/backend.log"
-echo "  重启后端: $0"
+echo "  停止IPFS: pkill -f 'ipfs daemon'"
+echo "  查看后端日志: tail -f backend/backend.log"
+echo "  查看IPFS日志: tail -f ipfs.log"
+echo "  重启系统: $0"
 echo ""
 echo -e "${BLUE}🔍 健康检查:${NC}"
-echo "  curl -s http://localhost:8001/health | jq"
+echo "  后端健康: curl -s http://localhost:8001/health | jq"
+echo "  IPFS版本: ipfs version"
+echo "  IPFS节点: curl -s http://localhost:5001/api/v0/version | jq"
 echo ""
 echo -e "${YELLOW}💡 提示:${NC}"
-echo "  - 后端服务在后台运行"
+echo "  - 后端服务和IPFS守护进程在后台运行"
 echo "  - 如有问题，请查看完整启动指南: STARTUP_COMPLETE_GUIDE.md"
-echo "  - 服务日志: backend/backend.log"
+echo "  - 服务日志: backend/backend.log, ipfs.log"
 
 # 清理临时文件
 rm -f /tmp/deploy_output.txt

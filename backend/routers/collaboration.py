@@ -124,11 +124,12 @@ async def get_conversation(collaboration_id: str):
         logger.error(f"Error getting conversation for collaboration {collaboration_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/ipfs/{ipfs_cid}", response_model=ConversationResponse)
+@router.get("/ipfs/{ipfs_cid}")
 async def get_conversation_by_ipfs(ipfs_cid: str):
     """通过IPFS CID获取对话记录"""
     try:
         conversation_data = await agent_collaboration_service.get_conversation_from_ipfs(ipfs_cid)
+        logger.info(f"Retrieved conversation data for IPFS CID {ipfs_cid}")
         return conversation_data
     except Exception as e:
         logger.error(f"Error getting conversation from IPFS {ipfs_cid}: {str(e)}")

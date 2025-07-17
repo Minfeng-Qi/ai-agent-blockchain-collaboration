@@ -383,6 +383,88 @@ class CollaborationDBService:
         finally:
             db.close()
 
+    def create_learning_event(self, learning_event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        创建学习事件记录
+        
+        Args:
+            learning_event: 学习事件数据
+            
+        Returns:
+            创建结果
+        """
+        db = self.get_db()
+        try:
+            # 创建区块链事件记录
+            blockchain_event = BlockchainEvent(
+                event_id=learning_event["event_id"],
+                event_type=learning_event["event_type"],
+                agent_id=learning_event["agent_id"],
+                block_number=learning_event.get("block_number"),
+                transaction_hash=learning_event.get("transaction_hash"),
+                data=json.dumps(learning_event["data"]),
+                timestamp=datetime.fromtimestamp(learning_event["timestamp"])
+            )
+            
+            db.add(blockchain_event)
+            db.commit()
+            db.refresh(blockchain_event)
+            
+            logger.info(f"Created learning event record: {learning_event['event_id']}")
+            
+            return {
+                "id": blockchain_event.id,
+                "event_id": blockchain_event.event_id,
+                "success": True
+            }
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error creating learning event: {e}")
+            db.rollback()
+            return {
+                "success": False,
+                "error": str(e)
+            }
+        finally:
+            db.close()
+
+    def get_agent_learning_events(self, agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        获取agent的学习事件
+        
+        Args:
+            agent_id: agent ID
+            limit: 返回记录数限制
+            
+        Returns:
+            学习事件列表
+        """
+        db = self.get_db()
+        try:
+            events = db.query(BlockchainEvent).filter(
+                BlockchainEvent.agent_id == agent_id,
+                BlockchainEvent.event_type.in_(["task_evaluation", "task_completion", "training"])
+            ).order_by(desc(BlockchainEvent.timestamp)).limit(limit).all()
+            
+            return [
+                {
+                    "event_id": event.event_id,
+                    "event_type": event.event_type,
+                    "agent_id": event.agent_id,
+                    "data": json.loads(event.data) if event.data else {},
+                    "transaction_hash": event.transaction_hash,
+                    "block_number": event.block_number,
+                    "timestamp": event.timestamp.isoformat() if event.timestamp else None
+                }
+                for event in events
+            ]
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting agent learning events: {e}")
+            return []
+        finally:
+            db.close()
+
 
 # 全局服务实例
 collaboration_db_service = CollaborationDBService()

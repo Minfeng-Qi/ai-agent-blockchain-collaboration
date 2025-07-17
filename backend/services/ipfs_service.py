@@ -32,16 +32,17 @@ class IPFSService:
         self.mock_cids = {}  # 存储模拟CID的字典
         
         if self.mock_mode:
-            logger.warning("IPFS service running in mock mode")
+            logger.warning(f"IPFS service running in mock mode (available: {self.ipfs_available})")
         else:
-            logger.info("IPFS service connected successfully")
+            logger.info(f"IPFS service connected successfully (available: {self.ipfs_available})")
     
     def _check_ipfs_availability(self) -> bool:
         """Check if IPFS is available"""
         try:
-            response = requests.get(f"{self.ipfs_api_url}/version", timeout=5)
+            response = requests.post(f"{self.ipfs_api_url}/version", timeout=5)
             return response.status_code == 200
-        except Exception:
+        except Exception as e:
+            logger.error(f"IPFS availability check failed: {str(e)}")
             return False
     
     async def upload_json(self, data: Dict) -> Dict[str, Any]:

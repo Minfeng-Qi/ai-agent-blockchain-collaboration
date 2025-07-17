@@ -10,16 +10,23 @@ import logging
 from datetime import datetime
 import concurrent.futures
 import threading
+import sys
+import os
+
+# Add the parent directory to the path to make imports work
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import OPENAI_API_KEY
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# OpenAI API密钥
-OPENAI_API_KEY = "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"
-
 # 配置OpenAI客户端
-client = OpenAI(api_key=OPENAI_API_KEY)
+if not OPENAI_API_KEY:
+    logger.error("OpenAI API key not found. Please set OPENAI_API_KEY in your environment variables.")
+    client = None
+else:
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
 class AgentCollaborationService:
     """Agent协作服务类"""
@@ -273,8 +280,12 @@ class AgentCollaborationService:
         messages.append({"role": "user", "content": user_prompt})
         
         try:
+            # 检查OpenAI客户端是否可用
+            if client is None:
+                raise Exception("OpenAI client not initialized. Please check your API key.")
+            
             # 调用OpenAI API
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
                 max_tokens=600,
@@ -451,7 +462,11 @@ class AgentCollaborationService:
         messages.append({"role": "user", "content": user_prompt})
         
         try:
-            response = openai.ChatCompletion.create(
+            # 检查OpenAI客户端是否可用
+            if client is None:
+                raise Exception("OpenAI client not initialized. Please check your API key.")
+            
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
                 max_tokens=500,

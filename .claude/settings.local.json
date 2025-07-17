@@ -89,7 +89,13 @@
       "Bash(open:*)",
       "Bash(cd:*)",
       "Bash(./start_backend_external_ganache.sh:*)",
-      "Bash(./quick_setup.sh:*)"
+      "Bash(./quick_setup.sh:*)",
+      "Bash(PYTHONPATH=/Users/minfeng/Desktop/llm-blockchain/code/backend python /Users/minfeng/Desktop/llm-blockchain/code/backend/main.py)",
+      "Bash(pip freeze)",
+      "Bash(conda install:*)",
+      "Bash(pgrep:*)",
+      "Bash(env)",
+      "Bash(sqlite3:*)"
     ],
     "deny": []
   }

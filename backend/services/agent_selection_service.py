@@ -184,39 +184,54 @@ class AgentSelectionService:
     
     @staticmethod
     async def select_collaborative_agents(task: Dict[str, Any], agents: List[Dict[str, Any]], 
-                                         max_agents: int = 3) -> List[Dict[str, Any]]:
+                                         max_agents: int = None) -> List[Dict[str, Any]]:
         """
         为任务选择多个协作代理
-        
         Args:
             task: 任务信息
             agents: 可用代理列表
-            max_agents: 最多选择的代理数量
-            
+            max_agents: 最多选择的代理数量（可选）
         Returns:
             List: 选中的代理列表
         """
         # 过滤出活跃的代理
         active_agents = [a for a in agents if a.get("active", True)]
-        
-        # 过滤出满足最低声誉要求的代理
         min_reputation = task.get("min_reputation", 0)
         qualified_agents = [a for a in active_agents if a.get("reputation", 0) >= min_reputation]
-        
         if not qualified_agents:
             logger.warning(f"No qualified agents found for task {task.get('task_id')}")
             return []
-        
         # 为每个代理评分
         for agent in qualified_agents:
             agent["score"] = AgentSelectionService.score_agent(agent, task)
-        
         # 按得分降序排序
         sorted_agents = sorted(qualified_agents, key=lambda a: a["score"], reverse=True)
-        
-        # 选择得分大于0的前N个代理
-        selected_agents = [a for a in sorted_agents if a["score"] > 0][:max_agents]
-        
+        # 动态分配：优先覆盖所有 required_capabilities
+        required_caps = set(task.get("required_capabilities", []))
+        covered_caps = set()
+        selected_agents = []
+        for agent in sorted_agents:
+            agent_caps = set(agent.get("capabilities", []))
+            new_caps = agent_caps & required_caps - covered_caps
+            if agent["score"] > 0 and (new_caps or not selected_agents):
+                selected_agents.append(agent)
+                covered_caps.update(agent_caps)
+                # 如果已覆盖所有能力且未指定 max_agents，则提前结束
+                if not max_agents and covered_caps >= required_caps:
+                    break
+            # 如果指定了 max_agents，上限截断
+            if max_agents and len(selected_agents) >= max_agents:
+                break
+        # 如果没覆盖所有能力，补充剩余高分 agent
+        if covered_caps < required_caps:
+            for agent in sorted_agents:
+                if agent not in selected_agents and agent["score"] > 0:
+                    selected_agents.append(agent)
+                    covered_caps.update(agent.get("capabilities", []))
+                    if not max_agents and covered_caps >= required_caps:
+                        break
+                if max_agents and len(selected_agents) >= max_agents:
+                    break
         return selected_agents
     
     @staticmethod

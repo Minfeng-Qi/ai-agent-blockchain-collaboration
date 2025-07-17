@@ -70,11 +70,14 @@ class BlockchainEvent(Base):
     __tablename__ = 'blockchain_events'
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id = Column(String(255), nullable=True, index=True)  # 学习事件ID
     event_type = Column(String(100), nullable=False)   # 事件类型
-    task_id = Column(String(255), nullable=False, index=True)
+    agent_id = Column(String(255), nullable=True, index=True)  # Agent ID for learning events
+    task_id = Column(String(255), nullable=True, index=True)   # Made nullable for learning events
     conversation_id = Column(String(255), nullable=True, index=True)
     transaction_hash = Column(String(255), nullable=True)
     block_number = Column(Integer, nullable=True)
     event_data = Column(JSON, nullable=False)          # 事件数据
+    data = Column(Text, nullable=True)                  # Additional data field for learning events
     timestamp = Column(DateTime, default=datetime.utcnow)
     processed = Column(Boolean, default=False)         # 是否已处理

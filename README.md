@@ -4,6 +4,14 @@
 
 ## 🚀 快速开始
 
+### 系统要求
+- **Node.js**: 18.x或更高版本
+- **Python**: 3.8或更高版本
+- **IPFS**: Kubo 0.35.0或更高版本
+- **Git**: 2.x或更高版本
+
+详细安装指南请参考: [系统要求](SYSTEM_REQUIREMENTS.md)
+
 ### 一键启动
 ```bash
 ./quick_start.sh
@@ -17,6 +25,8 @@
 - **前端** (React): http://localhost:3000
 - **后端** (FastAPI): http://localhost:8001 
 - **区块链** (Ganache): http://localhost:8545
+- **IPFS节点**: http://localhost:5001
+- **IPFS网关**: http://localhost:8080
 - **智能合约**: 7个部署的合约
 
 ## 🏗️ 项目结构
@@ -55,6 +65,12 @@ llm-blockchain/
 - 区块链数据集成
 - 智能合约交互
 - 实时数据获取
+- IPFS分布式存储
+
+### 存储系统
+- **IPFS**: 协作结果的分布式存储
+- **区块链**: 任务状态和交易记录
+- **本地数据库**: 协作历史和缓存
 
 ## 🛠️ 开发
 
@@ -87,7 +103,9 @@ cd frontend && npm start
 
 - **区块链状态**: Ganache控制台
 - **后端日志**: `tail -f backend.log`  
+- **IPFS日志**: `tail -f ipfs.log`
 - **前端**: 浏览器开发者工具
+- **IPFS状态**: http://localhost:5001/webui
 
 ## 📄 许可证
 

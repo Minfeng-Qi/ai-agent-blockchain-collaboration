@@ -5,12 +5,16 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, Any
+from dotenv import load_dotenv
+
+# 在导入其他模块之前加载环境变量
+load_dotenv()
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
-from routers import agents, tasks, learning, blockchain, analytics, agent_selection, simple_task_assignment  # collaboration temporarily disabled
+from routers import agents, tasks, learning, blockchain, collaboration, analytics, agent_selection, simple_task_assignment
 from services import contract_service
 
 # 配置日志
@@ -49,7 +53,7 @@ app.include_router(agents, prefix="/agents", tags=["agents"])
 app.include_router(tasks, prefix="/tasks", tags=["tasks"])
 app.include_router(learning, prefix="/learning", tags=["learning"])
 app.include_router(blockchain, prefix="/blockchain", tags=["blockchain"])
-# app.include_router(collaboration, prefix="/collaboration", tags=["collaboration"])  # Temporarily disabled
+app.include_router(collaboration, prefix="/collaboration", tags=["collaboration"])
 app.include_router(analytics, prefix="/analytics", tags=["analytics"])
 app.include_router(agent_selection, prefix="/agent-selection", tags=["agent_selection"])
 app.include_router(simple_task_assignment, prefix="/task-assignment", tags=["task_assignment"])

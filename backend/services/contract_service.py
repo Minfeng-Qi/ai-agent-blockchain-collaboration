@@ -17,13 +17,13 @@ except ImportError:
 
 # 自动生成的合约地址 (checksum格式)
 contract_addresses = {
-    "AgentRegistry": "0x0CA16C68e6bB6fcFc612aD99E9B3FB4E3727ACbd",
-    "ActionLogger": "0xb257f201B8d0014483EAf9749F7dF63c24C81A29",
-    "IncentiveEngine": "0x89f51B3945F025d44f0Fa0d065d376070AdA5d4D",
-    "TaskManager": "0x421a0D309ADE8515134fBFdA3F0F33846C450245",
-    "BidAuction": "0xac92E1F13A486c6981E72fBc438C3E137Ef82D2C",
-    "MessageHub": "0x9CD98A1c6BCA5e954D2AA7122733C20F657328ed",
-    "Learning": "0x6ed78454589Aa1251a90EABD7E773716189668b7",
+    "AgentRegistry": "0xF6D323b11AC6b7A0b3ca11004031E6939b606e55",
+    "ActionLogger": "0x14Ec9eF3dBDF1f46cAf8D2a4Cc8aA1bc32f60B8f",
+    "IncentiveEngine": "0xC391cdA07524c984A8e15d8f62D793e7cEd47Bc4",
+    "TaskManager": "0x5997459CB3bf62b892A0a60B1D042dC8CD75D9c1",
+    "BidAuction": "0x54443FA98D9B55e600bC95f6a74B2BcAa3516DE6",
+    "MessageHub": "0x75dfc2294EE33CB2f75115Bb80C894fcCc50A335",
+    "Learning": "0x7C9B96E209E1209472c23d00d2fD8Eb569909283",
 }
 
 # 配置
@@ -674,6 +674,37 @@ def assign_task(task_id: str, agent_id: str, sender_address: str) -> Dict[str, A
         logger.error(f"Error assigning task {task_id} to agent {agent_id}: {str(e)}")
         return {"success": False, "error": str(e)}
 
+def start_task(task_id: bytes, sender_address: str) -> Dict[str, Any]:
+    """
+    启动任务（将状态设置为InProgress）
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        # 调用合约方法
+        tx_hash = task_manager_contract.functions.startTask(task_id).transact(tx_data)
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error starting task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 def complete_task(task_id: str, result: str, sender_address: str) -> Dict[str, Any]:
     """
     完成任务
@@ -991,6 +1022,159 @@ def get_learning_events(agent_id: str) -> List[Dict[str, Any]]:
         return {"success": True, "events": events}
     except Exception as e:
         logger.error(f"Error getting learning events for agent {agent_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_task_history(task_id: str) -> Dict[str, Any]:
+    """
+    获取任务的完整历史记录，包括所有相关的区块链事件
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        task_id_bytes = bytes.fromhex(task_id)
+        history_events = []
+        
+        # 获取TaskCreated事件
+        try:
+            created_filter = task_manager_contract.events.TaskCreated.create_filter(
+                from_block='earliest',
+                to_block='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        except TypeError:
+            created_filter = task_manager_contract.events.TaskCreated.create_filter(
+                fromBlock='earliest',
+                toBlock='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        
+        created_events = created_filter.get_all_entries()
+        for event in created_events:
+            tx_receipt = w3.eth.get_transaction_receipt(event['transactionHash'])
+            history_events.append({
+                "type": "task_created",
+                "title": "Task Created",
+                "timestamp": event['blockNumber'],  # 使用区块号作为时间戳，实际应用中可以获取区块时间
+                "description": f"Task created by {event['args']['creator']}",
+                "details": {
+                    "creator": event['args']['creator'],
+                    "task_id": event['args']['taskId'].hex(),
+                    "transaction_hash": event['transactionHash'].hex(),
+                    "block_number": event['blockNumber'],
+                    "gas_used": tx_receipt['gasUsed']
+                },
+                "icon": "📅"
+            })
+        
+        # 获取AgentCollaborationStarted事件
+        try:
+            collab_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                from_block='earliest',
+                to_block='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        except TypeError:
+            collab_filter = task_manager_contract.events.AgentCollaborationStarted.create_filter(
+                fromBlock='earliest',
+                toBlock='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        
+        collab_events = collab_filter.get_all_entries()
+        for event in collab_events:
+            tx_receipt = w3.eth.get_transaction_receipt(event['transactionHash'])
+            selected_agents = event['args']['selectedAgents']
+            history_events.append({
+                "type": "collaboration_started",
+                "title": "Collaboration Started",
+                "timestamp": event['blockNumber'],
+                "description": f"Multi-agent collaboration started with {len(selected_agents)} agents",
+                "details": {
+                    "collaboration_id": event['args']['collaborationId'],
+                    "selected_agents": selected_agents,
+                    "agent_count": len(selected_agents),
+                    "transaction_hash": event['transactionHash'].hex(),
+                    "block_number": event['blockNumber'],
+                    "gas_used": tx_receipt['gasUsed']
+                },
+                "icon": "🤖"
+            })
+        
+        # 获取TaskAssigned事件
+        try:
+            assigned_filter = task_manager_contract.events.TaskAssigned.create_filter(
+                from_block='earliest',
+                to_block='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        except TypeError:
+            assigned_filter = task_manager_contract.events.TaskAssigned.create_filter(
+                fromBlock='earliest',
+                toBlock='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        
+        assigned_events = assigned_filter.get_all_entries()
+        for event in assigned_events:
+            tx_receipt = w3.eth.get_transaction_receipt(event['transactionHash'])
+            history_events.append({
+                "type": "task_assigned",
+                "title": "Task Assigned",
+                "timestamp": event['blockNumber'],
+                "description": f"Task assigned to agent {event['args']['agent'][:10]}...",
+                "details": {
+                    "agent": event['args']['agent'],
+                    "transaction_hash": event['transactionHash'].hex(),
+                    "block_number": event['blockNumber'],
+                    "gas_used": tx_receipt['gasUsed']
+                },
+                "icon": "⚡"
+            })
+        
+        # 获取TaskCompleted事件
+        try:
+            completed_filter = task_manager_contract.events.TaskCompleted.create_filter(
+                from_block='earliest',
+                to_block='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        except TypeError:
+            completed_filter = task_manager_contract.events.TaskCompleted.create_filter(
+                fromBlock='earliest',
+                toBlock='latest',
+                argument_filters={'taskId': task_id_bytes}
+            )
+        
+        completed_events = completed_filter.get_all_entries()
+        for event in completed_events:
+            tx_receipt = w3.eth.get_transaction_receipt(event['transactionHash'])
+            history_events.append({
+                "type": "task_completed",
+                "title": "Task Completed",
+                "timestamp": event['blockNumber'],
+                "description": f"Task completed with result: {event['args']['result'][:20]}...",
+                "details": {
+                    "result": event['args']['result'],
+                    "transaction_hash": event['transactionHash'].hex(),
+                    "block_number": event['blockNumber'],
+                    "gas_used": tx_receipt['gasUsed']
+                },
+                "icon": "✅"
+            })
+        
+        # 按时间戳排序事件
+        history_events.sort(key=lambda x: x['timestamp'])
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "history": history_events,
+            "total_events": len(history_events)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting task history for {task_id}: {str(e)}")
         return {"success": False, "error": str(e)}
 
 # 区块链数据相关方法
@@ -1911,6 +2095,122 @@ def record_collaboration_result(task_id: str, conversation_id: str, participants
         }
     except Exception as e:
         logger.error(f"Error recording collaboration result: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def record_learning_event(learning_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    在区块链上记录agent学习事件
+    """
+    try:
+        if not w3 or not w3.is_connected():
+            logger.warning("Blockchain not connected, cannot record learning event")
+            return {"success": False, "error": "Blockchain not connected"}
+        
+        # 检查Learning合约是否可用
+        if not contracts.get("Learning"):
+            logger.warning("Learning contract not available")
+            return {"success": False, "error": "Learning contract not available"}
+        
+        learning_contract = contracts["Learning"]
+        
+        # 准备交易参数
+        agent_id = learning_data["agent_id"]
+        event_type = learning_data["event_type"]
+        performance_data = learning_data["performance_data"]  # JSON字符串
+        timestamp = learning_data["timestamp"]
+        
+        # 获取默认账户
+        accounts = w3.eth.accounts
+        if not accounts:
+            logger.error("No accounts available for transaction")
+            return {"success": False, "error": "No accounts available"}
+        
+        from_account = accounts[0]
+        
+        logger.info(f"🔗 Recording learning event for agent {agent_id} on blockchain")
+        
+        # 调用智能合约的recordLearningEvent函数
+        tx_hash = learning_contract.functions.recordLearningEvent(
+            agent_id,
+            event_type,
+            performance_data,
+            timestamp
+        ).transact({'from': from_account})
+        
+        # 等待交易确认
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        logger.info(f"✅ Learning event recorded on blockchain: {tx_hash.hex()}")
+        
+        return {
+            "success": receipt["status"] == 1,
+            "transaction_hash": tx_hash.hex(),
+            "block_number": receipt["blockNumber"],
+            "agent_id": agent_id,
+            "event_type": event_type
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error recording learning event on blockchain: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_agent_learning_history(agent_id: str, limit: int = 10) -> Dict[str, Any]:
+    """
+    从区块链获取agent的学习历史
+    """
+    try:
+        if not w3 or not w3.is_connected():
+            return {"success": False, "error": "Blockchain not connected"}
+        
+        if not contracts.get("Learning"):
+            return {"success": False, "error": "Learning contract not available"}
+        
+        learning_contract = contracts["Learning"]
+        
+        # 调用智能合约获取学习历史
+        learning_events = learning_contract.functions.getAgentLearningHistory(agent_id, limit).call()
+        
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "learning_events": learning_events,
+            "total": len(learning_events)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting agent learning history: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_agent_performance_stats(agent_id: str) -> Dict[str, Any]:
+    """
+    从区块链获取agent的性能统计
+    """
+    try:
+        if not w3 or not w3.is_connected():
+            return {"success": False, "error": "Blockchain not connected"}
+        
+        if not contracts.get("Learning"):
+            return {"success": False, "error": "Learning contract not available"}
+        
+        learning_contract = contracts["Learning"]
+        
+        # 调用智能合约获取性能统计
+        stats = learning_contract.functions.getAgentPerformanceStats(agent_id).call()
+        
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "stats": {
+                "reputation": stats[0] if len(stats) > 0 else 0,
+                "total_tasks": stats[1] if len(stats) > 1 else 0,
+                "successful_tasks": stats[2] if len(stats) > 2 else 0,
+                "average_rating": stats[3] if len(stats) > 3 else 0,
+                "total_reward": stats[4] if len(stats) > 4 else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting agent performance stats: {str(e)}")
         return {"success": False, "error": str(e)}
 
 try:

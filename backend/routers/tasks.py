@@ -4,6 +4,7 @@ from datetime import datetime
 import uuid
 import logging
 import asyncio
+import time
 
 from services import contract_service
 from services.agent_collaboration_service import agent_collaboration_service as collaboration_service
@@ -108,6 +109,42 @@ async def debug_task(task_id: str):
         "collaboration_agents": collaboration_agents,
         "collaboration_agents_count": len(collaboration_agents),
         "all_events_count": len(all_events)
+    }
+
+@router.get("/{task_id}/history", response_model=Dict[str, Any])
+async def get_task_history(task_id: str):
+    """
+    获取任务的完整历史记录。
+    """
+    # 强制初始化合约服务如果需要
+    if not contract_service.w3 or not contract_service.w3.is_connected():
+        contract_service.init_web3()
+        contract_service.initialize_contracts()
+    
+    # 检查区块链连接
+    connection_status = contract_service.get_connection_status()
+    if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+        try:
+            # 从区块链获取任务历史
+            result = contract_service.get_task_history(task_id)
+            if result["success"]:
+                return {"success": True, "data": result}
+            else:
+                logger.warning(f"Failed to get task history for {task_id}: {result.get('error')}")
+                return {"success": False, "error": result.get('error')}
+        except Exception as e:
+            logger.error(f"Error getting task history for {task_id}: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    # 如果区块链未连接，返回mock数据
+    return {
+        "success": False,
+        "error": "Blockchain not connected",
+        "data": {
+            "task_id": task_id,
+            "history": [],
+            "total_events": 0
+        }
     }
 
 async def auto_execute_collaboration(task_id: str, task_info: Dict[str, Any]):
@@ -394,6 +431,17 @@ async def get_task(task_id: str):
                             task_data["assigned_agents"] = collaboration_agents
                     except Exception as e:
                         logger.warning(f"Failed to get collaboration agents for task {task_id}: {e}")
+                
+                # 检查数据库中是否有更新的协作结果
+                try:
+                    from services.collaboration_db_service import collaboration_db_service
+                    updated_result = collaboration_db_service.get_task_collaboration_result(task_id)
+                    if updated_result and updated_result.get('ipfs_cid'):
+                        logger.info(f"Found updated collaboration result for task {task_id}: {updated_result['ipfs_cid']}")
+                        task_data["result"] = updated_result['ipfs_cid']
+                        task_data["result_source"] = "database_updated"
+                except Exception as e:
+                    logger.debug(f"No updated collaboration result found for task {task_id}: {e}")
                 
                 return {"task": task_data}
             else:
@@ -778,6 +826,108 @@ async def complete_task(
     
     raise HTTPException(status_code=404, detail="Task not found")
 
+@router.post("/{task_id}/evaluate", response_model=Dict[str, Any])
+async def evaluate_task(task_id: str, evaluation_data: Dict[str, Any]):
+    """
+    评估任务完成情况并更新agent学习数据
+    """
+    try:
+        logger.info(f"🎯 Evaluating task {task_id} with data: {evaluation_data}")
+        
+        # 获取任务信息
+        task_result = contract_service.get_task(task_id)
+        if not task_result.get("success"):
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task_data = task_result.copy()
+        
+        # Get assigned agents from task data or evaluation data
+        assigned_agents = task_data.get("assigned_agents", [])
+        if not assigned_agents and task_data.get("assigned_agent"):
+            assigned_agents = [task_data.get("assigned_agent")]
+        
+        # Allow overriding assigned agents from evaluation data (for testing/Force Complete scenarios)
+        if evaluation_data.get("assigned_agents"):
+            assigned_agents = evaluation_data.get("assigned_agents")
+        
+        logger.info(f"📋 Task has {len(assigned_agents)} assigned agents")
+        
+        # 评估数据
+        success = evaluation_data.get("success", True)
+        rating = evaluation_data.get("rating", 5)
+        evaluator = evaluation_data.get("evaluator", "system")
+        notes = evaluation_data.get("notes", "")
+        
+        # 为每个参与的agent创建学习事件
+        learning_events = []
+        for agent_id in assigned_agents:
+            try:
+                # 计算奖励和声誉变化
+                reward_multiplier = rating / 5.0  # 将评分转换为奖励倍数
+                reputation_change = 5 if success else -3  # 成功+5，失败-3
+                reputation_change = int(reputation_change * reward_multiplier)
+                
+                # 创建学习事件数据
+                learning_event_data = {
+                    "agent_id": agent_id,
+                    "event_type": "task_evaluation",
+                    "data": {
+                        "task_id": task_id,
+                        "task_title": task_data.get("title", "Unknown Task"),
+                        "success": success,
+                        "rating": rating,
+                        "reputation_change": reputation_change,
+                        "reward": task_data.get("reward", 0) * reward_multiplier if success else 0,
+                        "capabilities_used": task_data.get("required_capabilities", []),
+                        "evaluator": evaluator,
+                        "notes": notes,
+                        "timestamp": time.time()
+                    }
+                }
+                
+                # 调用学习API创建事件
+                from services.agent_collaboration_service import agent_collaboration_service
+                learning_result = await agent_collaboration_service.create_learning_event(
+                    agent_id, 
+                    learning_event_data
+                )
+                
+                learning_events.append({
+                    "agent_id": agent_id,
+                    "learning_event": learning_result,
+                    "reputation_change": reputation_change,
+                    "reward": learning_event_data["data"]["reward"]
+                })
+                
+                logger.info(f"✅ Created learning event for agent {agent_id}: reputation {reputation_change:+d}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to create learning event for agent {agent_id}: {e}")
+                continue
+        
+        # 记录评估结果
+        evaluation_result = {
+            "task_id": task_id,
+            "evaluation_data": evaluation_data,
+            "learning_events": learning_events,
+            "total_agents_updated": len(learning_events),
+            "timestamp": time.time()
+        }
+        
+        logger.info(f"🎉 Task evaluation completed: {len(learning_events)} agents updated")
+        
+        return {
+            "success": True,
+            "message": f"Task evaluated successfully. {len(learning_events)} agents updated.",
+            "data": evaluation_result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error evaluating task {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/{task_id}/bid", response_model=Dict[str, Any])
 async def place_bid(
     task_id: str,
@@ -948,6 +1098,11 @@ async def start_task_collaboration(
                 
                 if result["success"]:
                     logger.info(f"Successfully started collaboration for task {task_id} with {len(selected_agents)} agents")
+                    
+                    # 启动后台协作任务
+                    asyncio.create_task(auto_execute_collaboration(task_id, task_info))
+                    logger.info(f"🚀 Started background collaboration execution for task {task_id}")
+                    
                     return {
                         "success": True,
                         "collaboration_id": collaboration_id,
@@ -1051,6 +1206,147 @@ async def start_task_collaboration(
     except Exception as e:
         logger.error(f"Error in start_task_collaboration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to start collaboration: {str(e)}")
+
+@router.post("/{task_id}/execute-collaboration", response_model=Dict[str, Any])
+async def execute_assigned_task_collaboration(task_id: str):
+    """
+    为已分配的任务执行agents协作，使用真实的OpenAI API调用。
+    这是第二步：在任务已经分配后，启动真实的AI协作。
+    """
+    try:
+        logger.info(f"🚀 Starting collaboration execution for assigned task {task_id}")
+        
+        # 检查区块链连接
+        connection_status = contract_service.get_connection_status()
+        if not connection_status["connected"]:
+            raise HTTPException(status_code=503, detail="Blockchain not connected")
+        
+        # 获取任务信息
+        task_result = contract_service.get_task(task_id)
+        if not task_result["success"]:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task_info = task_result
+        
+        # 检查任务状态 - 只有assigned状态的任务才能执行协作
+        if task_info.get("status") != "assigned":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Task must be in 'assigned' status to execute collaboration. Current status: {task_info.get('status')}"
+            )
+        
+        # 检查是否已有分配的agents
+        assigned_agents = task_info.get("assigned_agents", [])
+        if not assigned_agents:
+            raise HTTPException(status_code=400, detail="No agents assigned to this task")
+        
+        logger.info(f"📋 Found {len(assigned_agents)} assigned agents for task {task_id}")
+        
+        # 创建协作ID
+        collaboration_id = f"collab_{task_id}_{int(datetime.now().timestamp())}"
+        
+        # 启动真实的AI协作
+        logger.info(f"🤖 Starting real AI collaboration for task: {task_info.get('title', 'Unknown')}")
+        collaboration_result = await collaboration_service.run_collaboration(collaboration_id, task_info)
+        
+        # 检查协作是否成功
+        if collaboration_result.get("status") != "completed":
+            logger.error(f"❌ Collaboration failed for task {task_id}: {collaboration_result.get('error', 'Unknown error')}")
+            return {
+                "success": False,
+                "task_id": task_id,
+                "collaboration_id": collaboration_id,
+                "error": f"Collaboration failed: {collaboration_result.get('error', 'Unknown error')}",
+                "status": "failed"
+            }
+        
+        # 协作成功，更新任务状态为completed
+        logger.info(f"✅ Collaboration completed successfully! Updating task {task_id} to completed status")
+        
+        # 使用分配的代理地址而不是默认地址
+        assigned_agent = task_info.get("assigned_agent")
+        if not assigned_agent:
+            assigned_agent = assigned_agents[0] if assigned_agents else get_sender_address()
+        
+        # 将task_id转换为bytes32格式
+        task_id_bytes = bytes.fromhex(task_id)
+        
+        # 第一步：启动任务（assigned -> InProgress）
+        logger.info(f"🔄 Starting task {task_id} (assigned -> InProgress)")
+        start_result = contract_service.start_task(
+            task_id=task_id_bytes,
+            sender_address=assigned_agent
+        )
+        
+        if not start_result["success"]:
+            logger.error(f"❌ Failed to start task {task_id}: {start_result.get('error')}")
+            return {
+                "success": False,
+                "task_id": task_id,
+                "collaboration_id": collaboration_id,
+                "error": f"Collaboration succeeded but failed to start task: {start_result.get('error')}",
+                "status": "collaboration_completed_start_failed",
+                "collaboration_result": {
+                    "ipfs_cid": collaboration_result.get("ipfs_cid"),
+                    "conversation_length": len(collaboration_result.get("conversation", [])),
+                    "agents_count": len(assigned_agents),
+                    "api_mode": "real"
+                }
+            }
+        
+        logger.info(f"✅ Task {task_id} started successfully! TX: {start_result['transaction_hash']}")
+        
+        # 第二步：完成任务（InProgress -> Completed）
+        logger.info(f"🎯 Completing task {task_id} (InProgress -> Completed)")
+        completion_result = contract_service.complete_task(
+            task_id=task_id_bytes,
+            result=collaboration_result.get('ipfs_cid', ''),
+            sender_address=assigned_agent
+        )
+        
+        if completion_result["success"]:
+            logger.info(f"🎉 Task {task_id} completed successfully on blockchain! TX: {completion_result['transaction_hash']}")
+            
+            return {
+                "success": True,
+                "task_id": task_id,
+                "collaboration_id": collaboration_id,
+                "status": "completed",
+                "collaboration_result": {
+                    "ipfs_cid": collaboration_result.get("ipfs_cid"),
+                    "conversation_length": len(collaboration_result.get("conversation", [])),
+                    "agents_count": len(assigned_agents),
+                    "api_mode": "real"
+                },
+                "blockchain_result": {
+                    "start_transaction_hash": start_result["transaction_hash"],
+                    "start_block_number": start_result["block_number"],
+                    "completion_transaction_hash": completion_result["transaction_hash"],
+                    "completion_block_number": completion_result["block_number"]
+                },
+                "message": "Task collaboration completed successfully and status updated to completed"
+            }
+        else:
+            logger.error(f"❌ Failed to complete task {task_id} on blockchain: {completion_result.get('error')}")
+            return {
+                "success": False,
+                "task_id": task_id,
+                "collaboration_id": collaboration_id,
+                "error": f"Collaboration succeeded but failed to update task status: {completion_result.get('error')}",
+                "status": "collaboration_completed_blockchain_failed",
+                "collaboration_result": {
+                    "ipfs_cid": collaboration_result.get("ipfs_cid"),
+                    "conversation_length": len(collaboration_result.get("conversation", [])),
+                    "agents_count": len(assigned_agents),
+                    "api_mode": "real"
+                }
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error executing collaboration for task {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to execute collaboration: {str(e)}")
 
 @router.get("/{task_id}/suitable-agents", response_model=Dict[str, Any])
 async def get_suitable_agents(task_id: str):
@@ -1551,7 +1847,6 @@ async def get_task_conversations(task_id: str):
     """
     try:
         conversations = collaboration_db_service.get_task_conversations(task_id)
-        
         conversations_data = []
         for conv in conversations:
             conversations_data.append({
@@ -1563,13 +1858,32 @@ async def get_task_conversations(task_id: str):
                 "completed_at": conv.completed_at.isoformat() if conv.completed_at else None,
                 "message_count": len(conv.messages) if conv.messages else 0
             })
-        
+        # 如果数据库没有查到任何对话，尝试用任务 result 字段（IPFS CID）拉取协作内容
+        if not conversations_data:
+            from services import contract_service
+            task_result = contract_service.get_task(task_id)
+            if task_result.get("success"):
+                result_cid = task_result.get("result")
+                if result_cid and result_cid.startswith("Qm"):
+                    # 尝试从 IPFS 拉取协作内容
+                    from services.agent_collaboration_service import agent_collaboration_service
+                    ipfs_data = await agent_collaboration_service.get_conversation_from_ipfs(result_cid)
+                    if ipfs_data and "conversation" in ipfs_data:
+                        # 组装 conversations_data
+                        conversations_data.append({
+                            "id": result_cid,
+                            "conversation_id": result_cid,
+                            "status": "completed",
+                            "participants": ipfs_data.get("agents", []),
+                            "created_at": None,
+                            "completed_at": None,
+                            "message_count": len(ipfs_data.get("conversation", []))
+                        })
         return {
             "task_id": task_id,
             "conversations": conversations_data,
             "total": len(conversations_data)
         }
-        
     except Exception as e:
         logger.error(f"Error getting task conversations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1829,3 +2143,160 @@ async def get_recommended_agents(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+# Learning Dashboard Endpoints
+
+@router.get("/agents/{agent_id}/learning-events", response_model=Dict[str, Any])
+async def get_agent_learning_events(agent_id: str, limit: int = Query(50, ge=1, le=100)):
+    """
+    获取agent的学习事件（来自任务评估系统）
+    """
+    try:
+        # 尝试从数据库获取学习事件
+        learning_events = collaboration_db_service.get_agent_learning_events(agent_id, limit)
+        
+        if learning_events:
+            return {
+                "success": True,
+                "agent_id": agent_id,
+                "learning_events": learning_events,
+                "total": len(learning_events),
+                "source": "database"
+            }
+        else:
+            # 如果数据库没有数据，返回空列表
+            logger.info(f"No learning events found for agent {agent_id}")
+            return {
+                "success": True,
+                "agent_id": agent_id,
+                "learning_events": [],
+                "total": 0,
+                "source": "database"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting learning events for agent {agent_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/learning/agent-statistics", response_model=Dict[str, Any])
+async def get_agent_learning_statistics():
+    """
+    获取所有agent的学习统计数据（用于Learning Dashboard）
+    """
+    try:
+        # 获取所有agents
+        agents_result = contract_service.get_all_agents()
+        if not agents_result.get("success"):
+            logger.error(f"Failed to get agents from blockchain: {agents_result.get('error')}")
+            raise HTTPException(status_code=503, detail="Blockchain service unavailable")
+        
+        agents = agents_result.get("agents", [])
+        learning_statistics = []
+        
+        # 为每个agent获取学习统计数据
+        for agent in agents:
+            agent_id = agent.get("agent_id") or agent.get("address")
+            if not agent_id:
+                continue
+            
+            try:
+                # 获取agent的学习事件
+                learning_events = collaboration_db_service.get_agent_learning_events(agent_id, 20)
+                
+                # 计算统计数据
+                recent_evaluations = len([e for e in learning_events if e.get("event_type") == "task_evaluation"])
+                successful_evaluations = len([e for e in learning_events 
+                                           if e.get("event_type") == "task_evaluation" 
+                                           and e.get("data", {}).get("success", False)])
+                
+                # 从区块链数据获取基础信息，结合学习事件更新
+                reputation = agent.get("reputation", 0)
+                tasks_completed = agent.get("tasks_completed", 0)
+                average_score = agent.get("average_score", 0)
+                average_reward = agent.get("average_reward", 0)
+                
+                # 基于学习事件计算改进
+                for event in learning_events:
+                    if event.get("event_type") == "task_evaluation":
+                        event_data = event.get("data", {})
+                        if event_data.get("reputation_change"):
+                            reputation += event_data.get("reputation_change", 0)
+                        if event_data.get("reward"):
+                            average_reward = (average_reward + event_data.get("reward", 0)) / 2
+                
+                agent_stats = {
+                    "agent_id": agent_id,
+                    "agent_name": agent.get("name", f"Agent-{agent_id[-4:]}"),
+                    "reputation": max(0, min(100, reputation)),  # 限制在0-100范围内
+                    "average_score": average_score,
+                    "average_reward": average_reward,
+                    "tasks_completed": tasks_completed,
+                    "success_rate": (successful_evaluations / max(recent_evaluations, 1) * 100) if recent_evaluations > 0 else 0,
+                    "recent_evaluations": recent_evaluations,
+                    "successful_evaluations": successful_evaluations,
+                    "failed_evaluations": recent_evaluations - successful_evaluations,
+                    "learning_velocity": len(learning_events) / 30,  # 最近30天的学习速度
+                    "performance_trend": "improving" if successful_evaluations > recent_evaluations * 0.7 else "stable",
+                    "last_evaluation": learning_events[0].get("timestamp") if learning_events else None,
+                    "total_learning_events": len(learning_events),
+                    "source": "evaluation_system"
+                }
+                
+                learning_statistics.append(agent_stats)
+                
+            except Exception as e:
+                logger.error(f"Error processing learning statistics for agent {agent_id}: {str(e)}")
+                continue
+        
+        # 计算总体摘要
+        if learning_statistics:
+            summary = {
+                "total_agents": len(learning_statistics),
+                "avg_reputation": sum(a["reputation"] for a in learning_statistics) / len(learning_statistics),
+                "avg_success_rate": sum(a["success_rate"] for a in learning_statistics) / len(learning_statistics),
+                "total_evaluations": sum(a["recent_evaluations"] for a in learning_statistics),
+                "total_learning_events": sum(a["total_learning_events"] for a in learning_statistics),
+                "performance_distribution": {
+                    "improving": len([a for a in learning_statistics if a["performance_trend"] == "improving"]),
+                    "stable": len([a for a in learning_statistics if a["performance_trend"] == "stable"]),
+                    "declining": len([a for a in learning_statistics if a["performance_trend"] == "declining"])
+                }
+            }
+        else:
+            # 如果没有学习数据，返回空统计
+            summary = {
+                "total_agents": 0,
+                "avg_reputation": 0,
+                "avg_success_rate": 0,
+                "total_evaluations": 0,
+                "total_learning_events": 0,
+                "performance_distribution": {
+                    "improving": 0,
+                    "stable": 0,
+                    "declining": 0
+                }
+            }
+            return {
+                "success": True,
+                "data": {
+                    "agents": [],
+                    "summary": summary,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "blockchain"
+                }
+            }
+        
+        return {
+            "success": True,
+            "data": {
+                "agents": learning_statistics,
+                "summary": summary,
+                "timestamp": datetime.now().isoformat(),
+                "source": "evaluation_system"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting agent learning statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get learning statistics: {str(e)}")
+
