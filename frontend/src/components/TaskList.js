@@ -48,6 +48,8 @@ const TaskStatusChip = ({ status }) => {
         return { icon: <CheckCircleIcon fontSize="small" />, color: 'success' };
       case 'failed':
         return { icon: <ErrorIcon fontSize="small" />, color: 'error' };
+      case 'cancelled':
+        return { icon: <ErrorIcon fontSize="small" />, color: 'error' };
       case 'assigned':
         return { icon: <HourglassEmptyIcon fontSize="small" />, color: 'warning' };
       case 'open':
@@ -83,6 +85,7 @@ const TaskList = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [error, setError] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarSeverity, setSnackbarSeverity] = useState('warning');
   
   // Get agent filter from URL if present
   const queryParams = new URLSearchParams(location.search);
@@ -91,6 +94,24 @@ const TaskList = () => {
   useEffect(() => {
     fetchTasks();
   }, [agentFilter, tabValue]);
+
+  // Handle navigation state for refreshing after deletion
+  useEffect(() => {
+    if (location.state?.refreshTasks) {
+      console.log('🔄 Refreshing tasks after deletion:', location.state.deletedTaskId);
+      fetchTasks();
+      
+      // Show success message if provided
+      if (location.state.successMessage) {
+        setError(location.state.successMessage);
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+      }
+      
+      // Clear the state to prevent multiple refreshes
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // Refresh data when page regains focus
   useEffect(() => {
@@ -115,6 +136,9 @@ const TaskList = () => {
         params.status = statusFilters[tabValue - 1];
       }
       
+      // Add cache buster to ensure fresh data
+      params.t = Date.now();
+      
       console.log('Fetching tasks with params:', params);
       const data = await taskApi.getTasks(params);
       
@@ -130,6 +154,7 @@ const TaskList = () => {
     } catch (error) {
       console.error('Error fetching tasks:', error);
       setError('Failed to fetch tasks. Using sample data instead.');
+      setSnackbarSeverity('warning');
       setSnackbarOpen(true);
       
       // Use sample data as fallback
@@ -262,7 +287,7 @@ const TaskList = () => {
         onClose={handleSnackbarClose}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={handleSnackbarClose} severity="warning" sx={{ width: '100%' }}>
+        <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
           {error}
         </Alert>
       </Snackbar>

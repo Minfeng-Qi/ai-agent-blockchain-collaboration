@@ -239,9 +239,93 @@ const TaskDetails = () => {
       return;
     }
 
+    // First, try to get the real IPFS CID from the new API endpoint
+    let ipfsCid = null;
+    let resultData = null;
+    
     try {
       setLoadingResult(true);
-      console.log('🚀 Fetching real IPFS data with CID:', task.result);
+      
+      // Force direct API call to get IPFS CID
+      const apiClient = axios.create({
+        baseURL: 'http://localhost:8001',
+        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('🚀 Getting IPFS CID for task:', taskId);
+      const ipfsCidResponse = await apiClient.get(`/collaboration/task/${taskId}/ipfs-cid`);
+      console.log('✅ IPFS CID API response:', ipfsCidResponse.data);
+      
+      if (ipfsCidResponse.data.success && ipfsCidResponse.data.ipfs_cid) {
+        ipfsCid = ipfsCidResponse.data.ipfs_cid;
+        console.log('✅ Got real IPFS CID from API:', ipfsCid);
+      }
+    } catch (ipfsError) {
+      console.log('⚠️ Failed to get IPFS CID from API, falling back to parsing task.result');
+      console.log('Error:', ipfsError.message);
+    }
+    
+    // Fallback: Parse the result JSON to extract IPFS CID
+    if (!ipfsCid) {
+      try {
+        // Try to parse result as JSON first
+        resultData = JSON.parse(task.result);
+        console.log('📋 Parsed result data:', resultData);
+        
+        // Look for IPFS CID in various possible fields
+        ipfsCid = resultData.conversation_ipfs || 
+                  resultData.ipfs_cid || 
+                  resultData.final_result ||
+                  (typeof resultData.final_result === 'string' && resultData.final_result.includes('Qm') 
+                    ? resultData.final_result.match(/Qm[A-Za-z0-9]{44,}/)?.[0] 
+                    : null);
+        
+        console.log('🔍 Extracted IPFS CID from result:', ipfsCid);
+        
+        // If no IPFS CID in parsed JSON, treat the whole result as potential CID
+        if (!ipfsCid && typeof task.result === 'string' && task.result.startsWith('Qm')) {
+          ipfsCid = task.result;
+          console.log('🔍 Using task.result directly as IPFS CID:', ipfsCid);
+        }
+      } catch (parseError) {
+        console.log('📋 Result is not JSON, treating as direct IPFS CID:', task.result);
+        // If parsing fails, assume it's a direct IPFS CID
+        if (typeof task.result === 'string' && task.result.startsWith('Qm')) {
+          ipfsCid = task.result;
+        }
+      }
+    }
+    
+    if (!ipfsCid) {
+      console.log('❌ No valid IPFS CID found in result data');
+      // If no IPFS CID found, show the parsed result data instead
+      if (resultData) {
+        setCollaborationResult({
+          collaboration_id: resultData.collaboration_id || 'unknown',
+          task_title: task.title,
+          agents: resultData.participants || [],
+          conversation: [{
+            sender_address: 'system',
+            content: 'Task completed successfully, but conversation data is not available.',
+            timestamp: resultData.completed_at
+          }],
+          api_mode: 'fallback',
+          ipfs_cid: null,
+          timestamp: resultData.execution_time
+        });
+        return;
+      } else {
+        setError('No collaboration result available for this task');
+        return;
+      }
+    }
+
+    try {
+      // setLoadingResult is already set to true above
+      console.log('🚀 Fetching real IPFS data with CID:', ipfsCid);
       
       // Force direct API call to bypass service monitor  
       const apiClient = axios.create({
@@ -252,9 +336,9 @@ const TaskDetails = () => {
         }
       });
       
-      console.log('🚀 Making direct API call to /collaboration/ipfs/' + task.result);
+      console.log('🚀 Making direct API call to /collaboration/ipfs/' + ipfsCid);
       const cacheBuster = Date.now();
-      const directResponse = await apiClient.get(`/collaboration/ipfs/${task.result}?t=${cacheBuster}`);
+      const directResponse = await apiClient.get(`/collaboration/ipfs/${ipfsCid}?t=${cacheBuster}`);
       console.log('✅ IPFS API response received');
       console.log('📄 Response data:', JSON.stringify(directResponse.data, null, 2));
       console.log('📋 Task title in response:', directResponse.data?.task_title);
@@ -262,16 +346,68 @@ const TaskDetails = () => {
       
       if (directResponse.data && directResponse.data.conversation) {
         console.log('✅ Setting real IPFS collaboration result');
-        // Format the IPFS data to match expected structure
+        console.log('📋 Raw conversation data:', directResponse.data.conversation);
+        console.log('📋 Agents data:', directResponse.data.agents);
+        
+        // Process and format the IPFS data to match expected structure
+        const processedConversation = (directResponse.data.conversation || []).map((message, index) => {
+          // For assistant messages, try to extract agent name from content
+          if (message.role === 'assistant' && message.content) {
+            // Try to match different agent naming patterns
+            const agentMatch = message.content.match(/^(Agent\d+):\s/) || 
+                             message.content.match(/^(Agent\s+\d+):\s/) ||
+                             message.content.match(/^(\w+Agent\d*):\s/);
+            
+            if (agentMatch) {
+              const agentName = agentMatch[1];
+              // Find the corresponding agent info
+              const agentInfo = directResponse.data.agents?.find(agent => 
+                agent.name === agentName || agent.agent_id === agentName
+              );
+              
+              return {
+                ...message,
+                sender_address: agentInfo?.agent_id || agentName,
+                agent_name: agentName,
+                agent_capabilities: agentInfo?.capabilities || [],
+                timestamp: directResponse.data.timestamp || new Date().toISOString(),
+                round_number: Math.floor((index - 1) / 4) + 1, // Assuming 4 agents per round, skip system message
+                message_index: index
+              };
+            } else {
+              // If no agent pattern found, this might be a summary or final result
+              return {
+                ...message,
+                sender_address: 'assistant',
+                agent_name: 'AI Collaboration Summary',
+                timestamp: directResponse.data.timestamp || new Date().toISOString(),
+                message_index: index
+              };
+            }
+          }
+          
+          // For system and user messages
+          return {
+            ...message,
+            sender_address: message.role,
+            agent_name: message.role === 'system' ? 'System' : message.role === 'user' ? 'User' : 'Unknown',
+            timestamp: directResponse.data.timestamp || new Date().toISOString(),
+            message_index: index
+          };
+        });
+
+        console.log('🔧 Processed conversation:', processedConversation);
+        console.log('🔧 Sample processed message:', processedConversation[1]); // Check first assistant message
+
         setCollaborationResult({
-          collaboration_id: directResponse.data.collaboration_id || `ipfs_${task.result}`,
+          collaboration_id: directResponse.data.collaboration_id || `ipfs_${ipfsCid}`,
           task_id: directResponse.data.task_id || taskId,
           task_title: directResponse.data.task_title || task.title,
           agents: directResponse.data.agents || [],
-          conversation: directResponse.data.conversation || [],
+          conversation: processedConversation,
           result: null, // IPFS data doesn't have separate result field
           api_mode: directResponse.data.api_mode || 'real',
-          ipfs_cid: task.result,
+          ipfs_cid: ipfsCid,
           timestamp: directResponse.data.timestamp
         });
       } else {
@@ -337,17 +473,60 @@ const TaskDetails = () => {
     setSnackbarOpen(false);
   };
   
+  const [deletionPreview, setDeletionPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
   const handleDeleteTask = async () => {
     try {
-      await taskApi.deleteTask(taskId);
+      console.log('🗑️ Deleting task:', taskId);
+      const result = await taskApi.deleteTask(taskId);
+      console.log('✅ Task deletion result:', result);
+      
       setDeleteDialogOpen(false);
-      navigate('/tasks');
+      
+      // Update the task object to reflect deletion
+      if (task) {
+        setTask({
+          ...task,
+          status: 'cancelled'
+        });
+      }
+      
+      // Immediately navigate back to tasks list with refresh parameter
+      navigate('/tasks', { 
+        replace: true,
+        state: { 
+          refreshTasks: true, 
+          deletedTaskId: taskId,
+          successMessage: 'Task deleted successfully!'
+        }
+      });
     } catch (error) {
-      console.error('Error deleting task:', error);
+      console.error('❌ Error deleting task:', error);
       setDeleteDialogOpen(false);
-      setError('Failed to delete task');
+      setError(`Failed to delete task: ${error.response?.data?.detail || error.message}`);
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
+    }
+  };
+
+  const handleDeleteClick = async () => {
+    try {
+      setLoadingPreview(true);
+      console.log('🔍 Fetching deletion preview for task:', taskId);
+      
+      const preview = await taskApi.previewTaskDeletion(taskId);
+      console.log('📋 Deletion preview:', preview);
+      
+      setDeletionPreview(preview);
+      setDeleteDialogOpen(true);
+    } catch (error) {
+      console.error('❌ Error fetching deletion preview:', error);
+      setError(`Failed to preview deletion: ${error.message}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    } finally {
+      setLoadingPreview(false);
     }
   };
   
@@ -361,6 +540,7 @@ const TaskDetails = () => {
       case 'completed':
         return 2;
       case 'failed':
+      case 'cancelled':
         return 3;
       default:
         return 0;
@@ -462,7 +642,8 @@ const TaskDetails = () => {
             variant="outlined" 
             color="error"
             startIcon={<DeleteIcon />}
-            onClick={() => setDeleteDialogOpen(true)}
+            onClick={handleDeleteClick}
+            disabled={loadingPreview}
           >
             Delete
           </Button>
@@ -505,7 +686,10 @@ const TaskDetails = () => {
                   <StepLabel>Assigned</StepLabel>
                 </Step>
                 <Step>
-                  <StepLabel>Completed</StepLabel>
+                  <StepLabel>
+                    {task.status === 'cancelled' ? 'Cancelled' : 
+                     task.status === 'failed' ? 'Failed' : 'Completed'}
+                  </StepLabel>
                 </Step>
               </Stepper>
             </Box>
@@ -1238,19 +1422,82 @@ const TaskDetails = () => {
       <Dialog
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
       >
-        <DialogTitle>Delete Task</DialogTitle>
+        <DialogTitle>
+          <Box display="flex" alignItems="center">
+            <DeleteIcon sx={{ mr: 1, color: 'error.main' }} />
+            Delete Task
+          </Box>
+        </DialogTitle>
         <DialogContent>
-          <Typography>
-            Are you sure you want to delete this task? This action cannot be undone.
-          </Typography>
+          {deletionPreview ? (
+            <Box>
+              <Alert severity={deletionPreview.can_delete ? "warning" : "error"} sx={{ mb: 2 }}>
+                {deletionPreview.can_delete 
+                  ? "This action will permanently delete the task and all related data. This cannot be undone."
+                  : "This task cannot be deleted in its current state."
+                }
+              </Alert>
+              
+              <Typography variant="h6" gutterBottom>
+                Data Impact Summary
+              </Typography>
+              
+              {deletionPreview.data_impact && !deletionPreview.data_impact.error && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    The following data will be permanently deleted:
+                  </Typography>
+                  <Box sx={{ pl: 2 }}>
+                    <Typography variant="body2">• {deletionPreview.data_impact.conversations || 0} collaboration conversations</Typography>
+                    <Typography variant="body2">• {deletionPreview.data_impact.messages || 0} conversation messages</Typography>
+                    <Typography variant="body2">• {deletionPreview.data_impact.results || 0} collaboration results</Typography>
+                    <Typography variant="body2">• {deletionPreview.data_impact.blockchain_events || 0} blockchain events</Typography>
+                  </Box>
+                  <Typography variant="body2" sx={{ mt: 1, fontWeight: 'bold' }}>
+                    Total records to be deleted: {deletionPreview.data_impact.total_records || 0}
+                  </Typography>
+                </Box>
+              )}
+              
+              {deletionPreview.warnings && deletionPreview.warnings.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="error" gutterBottom>
+                    Warnings:
+                  </Typography>
+                  {deletionPreview.warnings.map((warning, index) => (
+                    <Typography key={index} variant="body2" color="error" sx={{ pl: 2 }}>
+                      • {warning}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+              
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Task Status: <Chip label={deletionPreview.task_status} size="small" />
+                </Typography>
+              </Box>
+            </Box>
+          ) : (
+            <Typography>
+              Loading deletion preview...
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={handleDeleteTask} color="error" variant="contained">
-            Delete
+          <Button 
+            onClick={handleDeleteTask} 
+            color="error" 
+            variant="contained"
+            disabled={!deletionPreview?.can_delete}
+          >
+            {deletionPreview?.can_delete ? 'Delete Permanently' : 'Cannot Delete'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1373,7 +1620,7 @@ const TaskDetails = () => {
               )}
               
               <Typography variant="caption" color="textSecondary">
-                {task.result ? `IPFS CID: ${task.result}` : 'Source: Database/API'}
+                {collaborationResult?.ipfs_cid ? `IPFS CID: ${collaborationResult.ipfs_cid}` : 'Source: Database/API'}
               </Typography>
             </Box>
           ) : (

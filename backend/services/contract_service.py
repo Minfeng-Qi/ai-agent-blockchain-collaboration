@@ -1709,7 +1709,7 @@ def get_all_events(filters: Dict[str, Any] = None, limit: int = 10, offset: int 
                         elif contract_name == "AgentRegistry":
                             event_types = ["AgentRegistered", "AgentUpdated", "AgentActivated", "AgentDeactivated", "CapabilitiesUpdated", "TaskScoreRecorded"]
                         elif contract_name == "TaskManager":
-                            event_types = ["TaskCreated", "TaskStatusUpdated", "TaskAssigned", "TaskCompleted", "TaskFailed", "TaskEvaluated"]
+                            event_types = ["TaskCreated", "TaskStatusUpdated", "TaskAssigned", "TaskCompleted", "TaskFailed", "TaskEvaluated", "TaskCancelled", "AgentCollaborationStarted", "TaskUpdated", "CollaborationConversationStarted"]
                         else:
                             event_types = []
                         

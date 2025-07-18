@@ -429,6 +429,180 @@ class CollaborationDBService:
         finally:
             db.close()
 
+    def delete_conversations_by_task_id(self, task_id: str) -> int:
+        """
+        删除指定task_id的所有协作对话数据
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            删除的记录数
+        """
+        db = self.get_db()
+        try:
+            # 查询要删除的conversations
+            conversations = db.query(Conversation).filter(
+                Conversation.task_id == task_id
+            ).all()
+            
+            deleted_count = 0
+            for conversation in conversations:
+                # 删除related messages和results（通过cascade自动删除）
+                db.delete(conversation)
+                deleted_count += 1
+            
+            db.commit()
+            logger.info(f"🗑️ Deleted {deleted_count} conversations for task {task_id}")
+            return deleted_count
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error deleting conversations for task {task_id}: {e}")
+            db.rollback()
+            return 0
+        finally:
+            db.close()
+    
+    def delete_blockchain_events_by_task_id(self, task_id: str) -> int:
+        """
+        删除指定task_id的所有区块链事件数据
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            删除的记录数
+        """
+        db = self.get_db()
+        try:
+            # 删除与该任务相关的所有区块链事件
+            deleted_count = db.query(BlockchainEvent).filter(
+                BlockchainEvent.task_id == task_id
+            ).delete()
+            
+            db.commit()
+            logger.info(f"🗑️ Deleted {deleted_count} blockchain events for task {task_id}")
+            return deleted_count
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error deleting blockchain events for task {task_id}: {e}")
+            db.rollback()
+            return 0
+        finally:
+            db.close()
+    
+    def get_blockchain_events(self, event_type: str = None, limit: int = 50, offset: int = 0, 
+                            task_id: str = None) -> List[Dict[str, Any]]:
+        """
+        获取区块链事件数据
+        
+        Args:
+            event_type: 事件类型过滤
+            limit: 返回记录数限制
+            offset: 偏移量
+            task_id: 任务ID过滤
+            
+        Returns:
+            事件数据列表
+        """
+        db = self.get_db()
+        try:
+            # 构建查询
+            query = db.query(BlockchainEvent)
+            
+            # 应用过滤条件
+            if event_type:
+                query = query.filter(BlockchainEvent.event_type == event_type)
+            
+            if task_id:
+                query = query.filter(BlockchainEvent.task_id == task_id)
+            
+            # 排序、分页
+            query = query.order_by(desc(BlockchainEvent.timestamp))
+            query = query.offset(offset).limit(limit)
+            
+            # 执行查询
+            events = query.all()
+            
+            # 转换为字典格式
+            result = []
+            for event in events:
+                event_dict = {
+                    'id': event.id,
+                    'event_id': event.event_id,
+                    'event_type': event.event_type,
+                    'agent_id': event.agent_id,
+                    'task_id': event.task_id,
+                    'conversation_id': event.conversation_id,
+                    'transaction_hash': event.transaction_hash,
+                    'block_number': event.block_number,
+                    'event_data': event.event_data,
+                    'data': event.data,
+                    'timestamp': event.timestamp,
+                    'processed': event.processed,
+                    'created_at': event.timestamp.isoformat() if event.timestamp else None
+                }
+                result.append(event_dict)
+            
+            logger.info(f"Retrieved {len(result)} blockchain events (type: {event_type}, task: {task_id})")
+            return result
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting blockchain events: {e}")
+            return []
+        finally:
+            db.close()
+    
+    def get_task_related_data_summary(self, task_id: str) -> Dict[str, Any]:
+        """
+        获取任务相关数据的摘要信息
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            数据摘要
+        """
+        db = self.get_db()
+        try:
+            # 统计conversations
+            conversations_count = db.query(Conversation).filter(
+                Conversation.task_id == task_id
+            ).count()
+            
+            # 统计blockchain events
+            events_count = db.query(BlockchainEvent).filter(
+                BlockchainEvent.task_id == task_id
+            ).count()
+            
+            # 统计messages（通过conversations）
+            messages_count = db.query(ConversationMessage).join(
+                Conversation, ConversationMessage.conversation_id == Conversation.conversation_id
+            ).filter(Conversation.task_id == task_id).count()
+            
+            # 统计results（通过conversations）
+            results_count = db.query(CollaborationResult).filter(
+                CollaborationResult.task_id == task_id
+            ).count()
+            
+            summary = {
+                "task_id": task_id,
+                "conversations": conversations_count,
+                "messages": messages_count,
+                "results": results_count,
+                "blockchain_events": events_count,
+                "total_records": conversations_count + messages_count + results_count + events_count
+            }
+            
+            logger.info(f"📊 Task {task_id} data summary: {summary}")
+            return summary
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting task data summary for {task_id}: {e}")
+            return {"error": str(e)}
+        finally:
+            db.close()
+
     def get_agent_learning_events(self, agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         获取agent的学习事件

@@ -348,7 +348,27 @@ async def get_tasks(
             if result["success"]:
                 tasks = result["tasks"]
                 
-                # 应用过滤器
+                # 获取已删除的任务列表
+                deleted_task_ids = set()
+                try:
+                    from services.collaboration_db_service import collaboration_db_service
+                    deleted_events = collaboration_db_service.get_blockchain_events(
+                        event_type="TaskDeleted",
+                        limit=1000
+                    )
+                    deleted_task_ids = {event.get("task_id") for event in deleted_events if event.get("task_id")}
+                    logger.info(f"Found {len(deleted_task_ids)} deleted tasks to filter out")
+                except Exception as e:
+                    logger.warning(f"Failed to get deleted tasks list: {e}")
+                
+                # 过滤掉已删除的任务
+                tasks = [t for t in tasks if t.get("task_id") not in deleted_task_ids]
+                
+                # 默认过滤掉已取消的任务，除非明确请求
+                if status != "cancelled":
+                    tasks = [t for t in tasks if t.get("status") != "cancelled"]
+                
+                # 应用状态过滤器
                 if status:
                     tasks = [t for t in tasks if t.get("status") == status]
                 
@@ -379,7 +399,11 @@ async def get_tasks(
     logger.info("Using mock tasks data")
     filtered_tasks = mock_tasks
     
-    # 应用过滤器
+    # 默认过滤掉已取消的任务，除非明确请求
+    if status != "cancelled":
+        filtered_tasks = [t for t in filtered_tasks if t.get("status") != "cancelled"]
+    
+    # 应用状态过滤器
     if status:
         filtered_tasks = [t for t in filtered_tasks if t["status"] == status]
     
@@ -994,47 +1018,193 @@ async def place_bid(
     
     raise HTTPException(status_code=404, detail="Task not found")
 
+@router.get("/{task_id}/delete-preview", response_model=Dict[str, Any])
+async def preview_task_deletion(task_id: str):
+    """
+    预览删除任务会影响哪些数据，不执行实际删除。
+    """
+    try:
+        logger.info(f"🔍 Previewing deletion impact for task {task_id}")
+        
+        # 检查任务是否存在
+        task_result = contract_service.get_task(task_id)
+        if not task_result.get("success"):
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task_data = task_result
+        task_status = task_data.get("status", "unknown")
+        
+        # 获取相关数据摘要
+        data_summary = {}
+        try:
+            from services.collaboration_db_service import collaboration_db_service
+            data_summary = collaboration_db_service.get_task_related_data_summary(task_id)
+        except Exception as e:
+            logger.warning(f"Failed to get data summary: {e}")
+            data_summary = {"error": str(e)}
+        
+        # 检查是否可以删除
+        can_delete = task_status not in ["in_progress"]
+        deletion_warnings = []
+        
+        if not can_delete:
+            deletion_warnings.append(f"Task status '{task_status}' prevents deletion")
+        
+        if data_summary.get("total_records", 0) > 0:
+            deletion_warnings.append("This task has associated collaboration data that will be permanently deleted")
+        
+        preview_result = {
+            "task_id": task_id,
+            "task_status": task_status,
+            "can_delete": can_delete,
+            "data_impact": data_summary,
+            "warnings": deletion_warnings,
+            "deletion_actions": [
+                "Cancel task on blockchain (if connected)",
+                "Delete collaboration conversations and messages",
+                "Delete blockchain events and learning records",
+                "Remove from local/mock data if present"
+            ]
+        }
+        
+        logger.info(f"📋 Deletion preview for task {task_id}: {preview_result}")
+        return preview_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error previewing deletion for task {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 @router.delete("/{task_id}", response_model=Dict[str, Any])
 async def delete_task(task_id: str):
     """
-    删除任务（在实际应用中可能是取消而不是删除）。
+    删除任务并清理所有相关数据。
+    注意：此操作会永久删除任务及其所有协作数据，不可恢复。
     """
-    # 检查区块链连接
-    connection_status = contract_service.get_connection_status()
-    if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+    try:
+        logger.info(f"🗑️ Starting deletion of task {task_id}")
+        
+        # 1. 首先检查任务是否存在和可删除
+        task_result = contract_service.get_task(task_id)
+        if not task_result.get("success"):
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task_data = task_result
+        task_status = task_data.get("status", "unknown")
+        
+        # 检查任务状态是否允许删除
+        if task_status in ["in_progress"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot delete task with status '{task_status}'. Please cancel the task first."
+            )
+        
+        logger.info(f"📋 Task {task_id} has status '{task_status}' and can be deleted")
+        
+        # 2. 清理数据库相关数据
+        cleanup_results = {}
+        
         try:
-            # 动态获取发送者地址
-            sender_address = get_sender_address()
+            from services.collaboration_db_service import collaboration_db_service
             
-            # 调用合约服务取消任务
-            result = contract_service.cancel_task(task_id, sender_address)
-            if result["success"]:
-                return {
-                    "success": True,
-                    "task_id": task_id,
-                    "transaction_hash": result["transaction_hash"],
-                    "block_number": result["block_number"],
-                    "source": "blockchain"
-                }
-            else:
-                logger.warning(f"Failed to cancel task on blockchain: {result.get('error')}")
+            # 清理协作对话数据
+            conversations_deleted = collaboration_db_service.delete_conversations_by_task_id(task_id)
+            cleanup_results["conversations_deleted"] = conversations_deleted
+            
+            # 清理区块链事件数据
+            events_deleted = collaboration_db_service.delete_blockchain_events_by_task_id(task_id)
+            cleanup_results["blockchain_events_deleted"] = events_deleted
+            
+            logger.info(f"🧹 Database cleanup completed: {cleanup_results}")
+            
         except Exception as e:
-            logger.error(f"Error canceling task on blockchain: {str(e)}")
-    
-    # 如果区块链未连接或取消失败，使用模拟数据
-    for i, task in enumerate(mock_tasks):
-        if task["task_id"] == task_id:
-            mock_tasks.pop(i)
-            
-            return {
-                "success": True,
-                "task_id": task_id,
-                "deleted_at": datetime.now().isoformat(),
-                "transaction_hash": f"0x{uuid.uuid4().hex}",
-                "source": "mock"
-            }
-    
-    raise HTTPException(status_code=404, detail="Task not found")
+            logger.warning(f"Failed to clean up database records: {e}")
+            cleanup_results["database_cleanup_error"] = str(e)
+        
+        # 3. 尝试从区块链取消/删除任务
+        blockchain_result = None
+        connection_status = contract_service.get_connection_status()
+        if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+            try:
+                # 动态获取发送者地址
+                sender_address = get_sender_address()
+                
+                # 调用合约服务取消任务
+                blockchain_result = contract_service.cancel_task(task_id, sender_address)
+                if blockchain_result["success"]:
+                    logger.info(f"✅ Task {task_id} cancelled on blockchain: {blockchain_result.get('transaction_hash')}")
+                else:
+                    logger.warning(f"Failed to cancel task on blockchain: {blockchain_result.get('error')}")
+            except Exception as e:
+                logger.error(f"Error canceling task on blockchain: {str(e)}")
+                blockchain_result = {"success": False, "error": str(e)}
+        
+        # 4. 清理模拟数据（如果存在）
+        mock_cleanup = False
+        for i, task in enumerate(mock_tasks):
+            if task["task_id"] == task_id:
+                mock_tasks.pop(i)
+                mock_cleanup = True
+                logger.info(f"🧹 Removed task {task_id} from mock data")
+                break
+        
+        # 5. 记录任务为已删除状态（即使区块链取消失败）
+        try:
+            from services.collaboration_db_service import collaboration_db_service
+            # 记录删除事件，即使区块链操作失败
+            collaboration_db_service.record_blockchain_event(
+                event_type="TaskDeleted",
+                task_id=task_id,
+                event_data={
+                    "deleted_at": datetime.now().isoformat(),
+                    "deleted_by": "system",
+                    "blockchain_success": blockchain_result.get("success", False) if blockchain_result else False,
+                    "reason": "Manual deletion"
+                },
+                transaction_hash=blockchain_result.get("transaction_hash") if blockchain_result and blockchain_result.get("success") else None
+            )
+            logger.info(f"📝 Recorded TaskDeleted event for task {task_id}")
+        except Exception as e:
+            logger.warning(f"Failed to record deletion event: {e}")
+        
+        # 6. 构建删除结果
+        deletion_result = {
+            "success": True,
+            "task_id": task_id,
+            "deleted_at": datetime.now().isoformat(),
+            "cleanup_summary": {
+                "database_cleanup": cleanup_results,
+                "blockchain_cancellation": blockchain_result,
+                "mock_data_cleanup": mock_cleanup
+            },
+            "warnings": []
+        }
+        
+        # 添加警告信息
+        if blockchain_result and not blockchain_result.get("success"):
+            deletion_result["warnings"].append("Failed to cancel task on blockchain")
+        
+        if cleanup_results.get("database_cleanup_error"):
+            deletion_result["warnings"].append("Some database records may not have been cleaned up")
+        
+        # 添加区块链信息（如果成功）
+        if blockchain_result and blockchain_result.get("success"):
+            deletion_result["transaction_hash"] = blockchain_result.get("transaction_hash")
+            deletion_result["block_number"] = blockchain_result.get("block_number")
+            deletion_result["source"] = "blockchain"
+        elif mock_cleanup:
+            deletion_result["transaction_hash"] = f"0x{uuid.uuid4().hex}"
+            deletion_result["source"] = "mock"
+        
+        logger.info(f"🎉 Task {task_id} deletion completed successfully")
+        return deletion_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error deleting task {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.post("/{task_id}/start-collaboration", response_model=Dict[str, Any])
 async def start_task_collaboration(
@@ -2299,4 +2469,96 @@ async def get_agent_learning_statistics():
     except Exception as e:
         logger.error(f"Error getting agent learning statistics: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get learning statistics: {str(e)}")
+
+@router.get("/events/cancelled", response_model=Dict[str, Any])
+async def get_cancelled_task_events(
+    limit: int = Query(default=50, description="Number of events to return"),
+    offset: int = Query(default=0, description="Number of events to skip"),
+    task_id: Optional[str] = Query(default=None, description="Filter by specific task ID"),
+    actor: Optional[str] = Query(default=None, description="Filter by actor who cancelled the task")
+):
+    """
+    获取TaskCancelled事件的专用API。
+    返回已删除/取消的任务事件列表，方便前端跟踪。
+    """
+    try:
+        # 获取TaskCancelled事件
+        cancelled_events = collaboration_db_service.get_blockchain_events(
+            event_type="TaskCancelled",
+            limit=limit,
+            offset=offset,
+            task_id=task_id
+        )
+        
+        # 处理事件数据
+        processed_events = []
+        for event in cancelled_events:
+            try:
+                # 解析事件参数
+                event_data = event.get('event_data', {})
+                
+                # 提取关键信息
+                processed_event = {
+                    "id": event.get("id"),
+                    "task_id": event.get("task_id"),
+                    "transaction_hash": event.get("transaction_hash"),
+                    "block_number": event.get("block_number"),
+                    "timestamp": event.get("timestamp"),
+                    "actor": event_data.get("actor"),
+                    "reason": event_data.get("reason", "Task cancelled"),
+                    "event_timestamp": event_data.get("timestamp"),
+                    "created_at": event.get("created_at"),
+                    "raw_event": event  # 包含完整的原始事件数据
+                }
+                
+                # 如果有actor过滤器，应用过滤
+                if actor and processed_event.get("actor") != actor:
+                    continue
+                    
+                processed_events.append(processed_event)
+                
+            except Exception as e:
+                logger.warning(f"Failed to process cancelled event {event.get('id')}: {e}")
+                continue
+        
+        # 统计信息
+        total_cancelled = len(processed_events)
+        
+        # 如果没有提供特定的task_id，获取总数统计
+        if not task_id:
+            try:
+                all_cancelled_events = collaboration_db_service.get_blockchain_events(
+                    event_type="TaskCancelled",
+                    limit=1000,  # 获取更多数据用于统计
+                    offset=0
+                )
+                total_cancelled = len(all_cancelled_events)
+            except Exception as e:
+                logger.warning(f"Failed to get total cancelled events count: {e}")
+        
+        return {
+            "success": True,
+            "data": {
+                "events": processed_events,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total_cancelled,
+                    "has_more": total_cancelled > offset + len(processed_events)
+                },
+                "filters": {
+                    "task_id": task_id,
+                    "actor": actor
+                },
+                "summary": {
+                    "total_cancelled_tasks": total_cancelled,
+                    "events_returned": len(processed_events)
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting cancelled task events: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cancelled events: {str(e)}")
 
