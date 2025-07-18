@@ -46,6 +46,9 @@ bid_auction_contract = None
 message_hub_contract = None
 learning_contract = None
 
+# 合约字典，用于通过名称访问合约
+contracts = {}
+
 def init_web3():
     """初始化Web3连接"""
     global w3
@@ -133,7 +136,7 @@ def initialize_contracts():
     """
     初始化所有合约
     """
-    global agent_registry_contract, action_logger_contract, incentive_engine_contract, task_manager_contract, bid_auction_contract, message_hub_contract, learning_contract
+    global agent_registry_contract, action_logger_contract, incentive_engine_contract, task_manager_contract, bid_auction_contract, message_hub_contract, learning_contract, contracts
     
     if not w3 or not w3.is_connected():
         logger.warning("Web3 not connected, cannot initialize contracts")
@@ -146,6 +149,17 @@ def initialize_contracts():
     bid_auction_contract = load_contract("BidAuction")
     message_hub_contract = load_contract("MessageHub")
     learning_contract = load_contract("Learning")
+    
+    # 更新contracts字典
+    contracts.update({
+        "AgentRegistry": agent_registry_contract,
+        "ActionLogger": action_logger_contract,
+        "IncentiveEngine": incentive_engine_contract,
+        "TaskManager": task_manager_contract,
+        "BidAuction": bid_auction_contract,
+        "MessageHub": message_hub_contract,
+        "Learning": learning_contract
+    })
     
     # 检查核心合约是否成功加载
     core_contracts_loaded = all([agent_registry_contract, task_manager_contract, learning_contract])
@@ -1791,8 +1805,15 @@ def record_collaboration_ipfs(collaboration_id: str, ipfs_cid: str, task_id: str
             "timestamp": int(time.time())
         })
         
-        tx_hash = learning_contract.functions.recordLearningEvent(
-            collaboration_id,
+        # 将collaboration_id转换为地址格式（如果不是地址格式）
+        if not collaboration_id.startswith('0x'):
+            # 如果collaboration_id不是地址格式，使用发送者地址
+            agent_address = sender_address
+        else:
+            agent_address = collaboration_id
+        
+        tx_hash = learning_contract.functions.recordEvent(
+            agent_address,
             "collaboration",
             collaboration_data
         ).transact(tx_data)
@@ -2229,12 +2250,18 @@ def record_learning_event(learning_data: Dict[str, Any]) -> Dict[str, Any]:
         
         logger.info(f"🔗 Recording learning event for agent {agent_id} on blockchain")
         
-        # 调用智能合约的recordLearningEvent函数
-        tx_hash = learning_contract.functions.recordLearningEvent(
-            agent_id,
+        # 将agent_id转换为地址格式（如果不是地址格式）
+        if not agent_id.startswith('0x'):
+            # 如果agent_id不是地址格式，使用默认地址或从账户列表获取
+            agent_address = from_account
+        else:
+            agent_address = agent_id
+        
+        # 调用智能合约的recordEvent函数
+        tx_hash = learning_contract.functions.recordEvent(
+            agent_address,
             event_type,
-            performance_data,
-            timestamp
+            performance_data
         ).transact({'from': from_account})
         
         # 等待交易确认

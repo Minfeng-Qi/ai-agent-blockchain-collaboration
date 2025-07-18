@@ -769,7 +769,7 @@ Ensure the final result is complete, coherent, and actionable.
             
             # 尝试记录到区块链（如果连接可用）
             try:
-                from services.contract_service import contract_service
+                from services import contract_service
                 if contract_service.w3 and contract_service.w3.is_connected():
                     # 准备区块链数据
                     blockchain_data = {

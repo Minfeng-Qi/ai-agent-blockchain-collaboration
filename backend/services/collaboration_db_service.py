@@ -402,7 +402,8 @@ class CollaborationDBService:
                 agent_id=learning_event["agent_id"],
                 block_number=learning_event.get("block_number"),
                 transaction_hash=learning_event.get("transaction_hash"),
-                data=json.dumps(learning_event["data"]),
+                event_data=learning_event["data"],  # 设置必须的event_data字段
+                data=json.dumps(learning_event["data"]),  # 保留data字段作为JSON字符串
                 timestamp=datetime.fromtimestamp(learning_event["timestamp"])
             )
             
