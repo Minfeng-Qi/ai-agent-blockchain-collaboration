@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
   Box,
   Typography,
@@ -79,14 +80,148 @@ const ConversationViewer = () => {
   const fetchTaskConversations = async () => {
     setLoading(true);
     try {
-      const response = await taskApi.getTaskConversations(taskId);
-      // If there are conversations, show details of the first conversation
-      if (response.conversations && response.conversations.length > 0) {
-        const firstConversation = response.conversations[0];
-        navigate(`/tasks/${taskId}/conversations/${firstConversation.conversation_id}`);
-      } else {
-        setConversation(null);
+      console.log('🔍 Fetching task conversations for task:', taskId);
+      
+      // First, try to get the task details to check if it's completed and has results
+      const apiClient = axios.create({
+        baseURL: 'http://localhost:8001',
+        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      // Get task details
+      const taskResponse = await apiClient.get(`/tasks/${taskId}`);
+      console.log('📄 Task details:', taskResponse.data);
+      
+      if (taskResponse.data?.task?.status === 'completed' && taskResponse.data?.task?.result) {
+        console.log('✅ Task is completed, fetching collaboration result directly');
+        
+        // Try to get IPFS CID from our new API endpoint
+        try {
+          const ipfsCidResponse = await apiClient.get(`/collaboration/task/${taskId}/ipfs-cid`);
+          if (ipfsCidResponse.data.success && ipfsCidResponse.data.ipfs_cid) {
+            const ipfsCid = ipfsCidResponse.data.ipfs_cid;
+            console.log('🎯 Got IPFS CID:', ipfsCid);
+            
+            // Fetch the actual collaboration data from IPFS
+            const ipfsResponse = await apiClient.get(`/collaboration/ipfs/${ipfsCid}`);
+            console.log('📋 IPFS collaboration data:', ipfsResponse.data);
+            
+            // Process the IPFS data similar to TaskDetails.js
+            const processedConversation = (ipfsResponse.data.conversation || []).map((message, index) => {
+              if (message.role === 'assistant' && message.content) {
+                const agentMatch = message.content.match(/^(Agent\d+):\s/) || 
+                                 message.content.match(/^(Agent\s+\d+):\s/) ||
+                                 message.content.match(/^(\w+Agent\d*):\s/);
+                
+                if (agentMatch) {
+                  const agentName = agentMatch[1];
+                  const agentInfo = ipfsResponse.data.agents?.find(agent => 
+                    agent.name === agentName || agent.agent_id === agentName
+                  );
+                  
+                  return {
+                    ...message,
+                    sender_address: agentInfo?.agent_id || agentName,
+                    agent_name: agentName,
+                    agent_capabilities: agentInfo?.capabilities || [],
+                    timestamp: ipfsResponse.data.timestamp || new Date().toISOString(),
+                    round_number: Math.floor((index - 1) / 4) + 1,
+                    message_index: index
+                  };
+                } else {
+                  return {
+                    ...message,
+                    sender_address: 'assistant',
+                    agent_name: 'AI Collaboration Summary',
+                    timestamp: ipfsResponse.data.timestamp || new Date().toISOString(),
+                    message_index: index
+                  };
+                }
+              }
+              
+              return {
+                ...message,
+                sender_address: message.role,
+                agent_name: message.role === 'system' ? 'System' : message.role === 'user' ? 'User' : 'Unknown',
+                timestamp: ipfsResponse.data.timestamp || new Date().toISOString(),
+                message_index: index
+              };
+            });
+            
+            // Set up conversation data
+            setConversation({
+              task_id: taskId,
+              task_description: taskResponse.data.task.title,
+              collaboration_id: ipfsResponse.data.collaboration_id,
+              status: 'completed',
+              participants: ipfsResponse.data.agents?.map(agent => agent.agent_id) || [],
+              agent_roles: ipfsResponse.data.agents?.reduce((acc, agent) => {
+                acc[agent.agent_id] = {
+                  agent_name: agent.name,
+                  capabilities: agent.capabilities
+                };
+                return acc;
+              }, {}) || {},
+              messages: processedConversation,
+              result: {
+                success: true,
+                final_result: ipfsResponse.data.conversation?.[ipfsResponse.data.conversation.length - 1]?.content || 'Collaboration completed successfully',
+                conversation_summary: 'Multi-agent collaboration completed with real AI interactions',
+                message_count: processedConversation.length,
+                completed_at: ipfsResponse.data.timestamp
+              },
+              final_result: {
+                final_result: ipfsResponse.data.conversation?.[ipfsResponse.data.conversation.length - 1]?.content || 'Collaboration completed successfully',
+                conversation_summary: 'Multi-agent collaboration completed with real AI interactions',
+                completed_at: ipfsResponse.data.timestamp
+              }
+            });
+            
+            return;
+          }
+        } catch (ipfsError) {
+          console.log('⚠️ Failed to get IPFS data, falling back to task result parsing');
+        }
+        
+        // Fallback: try to parse task result JSON
+        try {
+          const resultData = JSON.parse(taskResponse.data.task.result);
+          if (resultData.collaboration_id) {
+            // Create a basic conversation structure from parsed result
+            setConversation({
+              task_id: taskId,
+              task_description: taskResponse.data.task.title,
+              collaboration_id: resultData.collaboration_id,
+              status: 'completed',
+              participants: resultData.participants?.map(p => p.agent_id) || [],
+              agent_roles: {},
+              messages: [{
+                role: 'system',
+                content: 'Task completed successfully, but detailed conversation data is not available.',
+                sender_address: 'system',
+                agent_name: 'System',
+                timestamp: resultData.completed_at
+              }],
+              result: {
+                success: true,
+                final_result: 'Task completed successfully',
+                conversation_summary: 'Task completed but conversation details are not available',
+                completed_at: resultData.completed_at
+              }
+            });
+            return;
+          }
+        } catch (parseError) {
+          console.log('Failed to parse task result JSON:', parseError);
+        }
       }
+      
+      // If task is not completed or no result, show empty state
+      setConversation(null);
+      
     } catch (error) {
       console.error('Error fetching task conversations:', error);
       setError('Failed to load conversations');

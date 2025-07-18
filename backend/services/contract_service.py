@@ -17,13 +17,13 @@ except ImportError:
 
 # 自动生成的合约地址 (checksum格式)
 contract_addresses = {
-    "AgentRegistry": "0xF6D323b11AC6b7A0b3ca11004031E6939b606e55",
-    "ActionLogger": "0x14Ec9eF3dBDF1f46cAf8D2a4Cc8aA1bc32f60B8f",
-    "IncentiveEngine": "0xC391cdA07524c984A8e15d8f62D793e7cEd47Bc4",
-    "TaskManager": "0x5997459CB3bf62b892A0a60B1D042dC8CD75D9c1",
-    "BidAuction": "0x54443FA98D9B55e600bC95f6a74B2BcAa3516DE6",
-    "MessageHub": "0x75dfc2294EE33CB2f75115Bb80C894fcCc50A335",
-    "Learning": "0x7C9B96E209E1209472c23d00d2fD8Eb569909283",
+    "AgentRegistry": "0x88bcFA1F0d0E8E74a7D327A8A7F68704473F8F55",
+    "ActionLogger": "0x235E7aDAE4109647C940E6388D9fe135BDBB5684",
+    "IncentiveEngine": "0x6aaf4B04A410a4f4C0d29CA5FB85BDAD8ecC5620",
+    "TaskManager": "0xCd967DCB14F76006a3c031CFf233Bf1C0E50a336",
+    "BidAuction": "0x35AA246bFB38787A5692dC72B4132171ab694B2F",
+    "MessageHub": "0x6a73b34f09934bE58B373f90E2c7289C757cEe1F",
+    "Learning": "0xDd1b3F77D3e153ABEC3748b974be79dC80FCBd45",
 }
 
 # 配置
@@ -68,6 +68,41 @@ def init_web3():
     except Exception as e:
         logger.error(f"Failed to initialize Web3: {str(e)}")
         return False
+
+def get_ganache_accounts():
+    """获取 Ganache 账户列表"""
+    global w3
+    if not w3:
+        logger.error("Web3 not initialized")
+        return []
+    
+    try:
+        accounts = w3.eth.accounts
+        logger.info(f"Found {len(accounts)} Ganache accounts")
+        return accounts
+    except Exception as e:
+        logger.error(f"Error getting Ganache accounts: {str(e)}")
+        return []
+
+def get_default_sender_address():
+    """获取默认的发送方地址（第一个 Ganache 账户）"""
+    global w3
+    if not w3:
+        logger.error("Web3 not initialized")
+        return None
+    
+    try:
+        accounts = w3.eth.accounts
+        if accounts:
+            default_address = accounts[0]
+            logger.info(f"Using default sender address: {default_address}")
+            return default_address
+        else:
+            logger.error("No accounts found in Ganache")
+            return None
+    except Exception as e:
+        logger.error(f"Error getting default sender address: {str(e)}")
+        return None
 
 def load_contract(contract_name: str):
     """加载智能合约"""
@@ -713,6 +748,16 @@ def complete_task(task_id: str, result: str, sender_address: str) -> Dict[str, A
         return {"success": False, "error": "Contract not initialized"}
     
     try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            # 确保task_id是64字符的hex字符串，然后转换为32字节
+            if len(task_id) == 64:
+                task_id_bytes = bytes.fromhex(task_id)
+            else:
+                raise ValueError(f"Invalid task_id length: {len(task_id)}, expected 64 hex characters")
+        
         # 准备交易数据
         tx_data = {
             "from": sender_address,
@@ -722,7 +767,7 @@ def complete_task(task_id: str, result: str, sender_address: str) -> Dict[str, A
         }
         
         # 调用合约方法
-        tx_hash = task_manager_contract.functions.completeTask(task_id, result).transact(tx_data)
+        tx_hash = task_manager_contract.functions.completeTask(task_id_bytes, result).transact(tx_data)
         
         # 等待交易确认
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
@@ -734,6 +779,61 @@ def complete_task(task_id: str, result: str, sender_address: str) -> Dict[str, A
         }
     except Exception as e:
         logger.error(f"Error completing task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def complete_assigned_task(task_id: str, result: str, sender_address: str) -> Dict[str, Any]:
+    """
+    直接完成assigned状态的任务（先启动再完成）
+    """
+    if not task_manager_contract:
+        return {"success": False, "error": "Contract not initialized"}
+    
+    try:
+        # 将task_id转换为bytes32
+        if task_id.startswith('0x'):
+            task_id_bytes = bytes.fromhex(task_id[2:])
+        else:
+            # 确保task_id是64字符的hex字符串，然后转换为32字节
+            if len(task_id) == 64:
+                task_id_bytes = bytes.fromhex(task_id)
+            else:
+                raise ValueError(f"Invalid task_id length: {len(task_id)}, expected 64 hex characters")
+        
+        # 准备交易数据
+        tx_data = {
+            "from": sender_address,
+            "gas": 3000000,
+            "gasPrice": w3.eth.gas_price,
+            "nonce": w3.eth.get_transaction_count(sender_address)
+        }
+        
+        logger.info(f"🚀 Starting task {task_id} to enable completion")
+        
+        # 首先启动任务（将状态从assigned改为InProgress）
+        start_tx_hash = task_manager_contract.functions.startTask(task_id_bytes).transact(tx_data)
+        start_receipt = w3.eth.wait_for_transaction_receipt(start_tx_hash)
+        
+        if start_receipt["status"] != 1:
+            logger.error(f"Failed to start task {task_id}")
+            return {"success": False, "error": "Failed to start task"}
+        
+        logger.info(f"✅ Task {task_id} started, now completing...")
+        
+        # 更新nonce用于第二个交易
+        tx_data["nonce"] = w3.eth.get_transaction_count(sender_address)
+        
+        # 然后立即完成任务
+        complete_tx_hash = task_manager_contract.functions.completeTask(task_id_bytes, result).transact(tx_data)
+        complete_receipt = w3.eth.wait_for_transaction_receipt(complete_tx_hash)
+        
+        return {
+            "success": complete_receipt["status"] == 1,
+            "start_transaction_hash": start_tx_hash.hex(),
+            "complete_transaction_hash": complete_tx_hash.hex(),
+            "block_number": complete_receipt["blockNumber"]
+        }
+    except Exception as e:
+        logger.error(f"Error completing assigned task {task_id}: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def start_agent_collaboration(task_id: str, selected_agents: List[str], collaboration_id: str, sender_address: str) -> Dict[str, Any]:

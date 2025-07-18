@@ -16,6 +16,7 @@ from fastapi.openapi.utils import get_openapi
 
 from routers import agents, tasks, learning, blockchain, collaboration, analytics, agent_selection, simple_task_assignment
 from services import contract_service
+from services.background_task_executor import start_background_executor
 
 # 配置日志
 logging.basicConfig(
@@ -73,6 +74,17 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
+# 应用启动事件
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时的初始化"""
+    logger.info("🚀 Starting Agent Learning System...")
+    
+    # 启动后台任务执行器
+    logger.info("Starting background task executor...")
+    await start_background_executor()
+    logger.info("✅ Background task executor started")
+
 @app.get("/")
 async def root():
     """
@@ -99,6 +111,97 @@ async def health_check():
         },
         "blockchain_details": blockchain_status
     }
+
+@app.get("/executor/status")
+async def executor_status():
+    """
+    检查后台任务执行器状态。
+    """
+    from services.background_task_executor import get_background_executor
+    
+    try:
+        executor = get_background_executor()
+        if executor:
+            status = executor.get_status()
+            return {
+                "executor_running": status.get("is_running", False),
+                "check_interval": status.get("check_interval", 30),
+                "service_type": status.get("service_type", "unknown")
+            }
+        else:
+            return {
+                "executor_running": False,
+                "error": "Executor instance not found"
+            }
+    except Exception as e:
+        return {
+            "executor_running": False,
+            "error": str(e)
+        }
+
+@app.post("/executor/check-tasks")
+async def manual_task_check():
+    """
+    手动触发任务检查和执行。
+    """
+    from services.background_task_executor import get_background_executor
+    
+    try:
+        executor = get_background_executor()
+        if not executor:
+            return {"success": False, "error": "Executor not found"}
+        
+        # 手动触发一次任务检查
+        assigned_tasks = await executor._get_assigned_tasks()
+        
+        return {
+            "success": True,
+            "assigned_tasks_found": len(assigned_tasks),
+            "tasks": [{"task_id": task.get("task_id"), "title": task.get("title"), "status": task.get("status")} for task in assigned_tasks]
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/executor/execute-task")
+async def manual_task_execution():
+    """
+    手动执行下一个assigned任务。
+    """
+    from services.background_task_executor import get_background_executor
+    
+    try:
+        executor = get_background_executor()
+        if not executor:
+            return {"success": False, "error": "Executor not found"}
+        
+        # 获取assigned任务
+        assigned_tasks = await executor._get_assigned_tasks()
+        if not assigned_tasks:
+            return {"success": False, "message": "No assigned tasks found"}
+        
+        # 排序任务
+        sorted_tasks = executor._sort_tasks_by_assignment_time(assigned_tasks)
+        next_task = sorted_tasks[0]
+        
+        # 执行任务
+        await executor._execute_task(next_task)
+        
+        return {
+            "success": True,
+            "executed_task": {
+                "task_id": next_task.get("task_id"),
+                "title": next_task.get("title"),
+                "status": next_task.get("status")
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @app.get("/stats")
 async def system_stats():
