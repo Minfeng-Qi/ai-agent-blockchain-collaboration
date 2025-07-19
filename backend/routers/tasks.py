@@ -111,41 +111,6 @@ async def debug_task(task_id: str):
         "all_events_count": len(all_events)
     }
 
-@router.get("/{task_id}/history", response_model=Dict[str, Any])
-async def get_task_history(task_id: str):
-    """
-    获取任务的完整历史记录。
-    """
-    # 强制初始化合约服务如果需要
-    if not contract_service.w3 or not contract_service.w3.is_connected():
-        contract_service.init_web3()
-        contract_service.initialize_contracts()
-    
-    # 检查区块链连接
-    connection_status = contract_service.get_connection_status()
-    if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
-        try:
-            # 从区块链获取任务历史
-            result = contract_service.get_task_history(task_id)
-            if result["success"]:
-                return {"success": True, "data": result}
-            else:
-                logger.warning(f"Failed to get task history for {task_id}: {result.get('error')}")
-                return {"success": False, "error": result.get('error')}
-        except Exception as e:
-            logger.error(f"Error getting task history for {task_id}: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    # 如果区块链未连接，返回mock数据
-    return {
-        "success": False,
-        "error": "Blockchain not connected",
-        "data": {
-            "task_id": task_id,
-            "history": [],
-            "total_events": 0
-        }
-    }
 
 async def auto_execute_collaboration(task_id: str, task_info: Dict[str, Any]):
     """
@@ -858,12 +823,47 @@ async def evaluate_task(task_id: str, evaluation_data: Dict[str, Any]):
     try:
         logger.info(f"🎯 Evaluating task {task_id} with data: {evaluation_data}")
         
+        # 检查是否已经评价过（除非是系统自动评价）
+        evaluation_check = collaboration_db_service.check_task_evaluation_exists(task_id)
+        evaluator = evaluation_data.get("evaluator", "user")
+        
+        if evaluation_check["evaluated"]:
+            if evaluator != "system":
+                # 用户重复评价：直接拒绝
+                logger.warning(f"⚠️ Task {task_id} has already been evaluated by user")
+                last_eval = evaluation_check["last_evaluation"]
+                
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Task has already been evaluated on {last_eval['timestamp']} by {last_eval['evaluator']}. Duplicate evaluations are not allowed."
+                )
+            else:
+                # 系统自动评价：如果用户已评价过，就跳过系统评价
+                logger.info(f"⏭️ Task {task_id} already evaluated by user, skipping system auto-evaluation")
+                return {
+                    "success": True,
+                    "message": f"Task already evaluated by user, system auto-evaluation skipped.",
+                    "data": {
+                        "task_id": task_id,
+                        "evaluation_data": evaluation_data,
+                        "skipped": True,
+                        "reason": "User evaluation already exists"
+                    }
+                }
+        
         # 获取任务信息
         task_result = contract_service.get_task(task_id)
         if not task_result.get("success"):
-            raise HTTPException(status_code=404, detail="Task not found")
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
         
         task_data = task_result.copy()
+        
+        # 检查任务状态
+        if task_data.get("status") != "completed":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Task must be completed before evaluation. Current status: {task_data.get('status')}"
+            )
         
         # Get assigned agents from task data or evaluation data
         assigned_agents = task_data.get("assigned_agents", [])
@@ -950,6 +950,125 @@ async def evaluate_task(task_id: str, evaluation_data: Dict[str, Any]):
         raise
     except Exception as e:
         logger.error(f"❌ Error evaluating task {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/auto-evaluate", response_model=Dict[str, Any])
+async def auto_evaluate_overdue_tasks():
+    """
+    检查并自动评价超过2天未评价的已完成任务
+    """
+    try:
+        logger.info("🤖 Starting automatic evaluation of overdue tasks...")
+        
+        # 获取待评价任务信息
+        pending_info = collaboration_db_service.get_tasks_pending_evaluation(days_threshold=2)
+        evaluated_task_ids = set(pending_info["evaluated_task_ids"])
+        
+        # 获取所有已完成的任务
+        completed_tasks = []
+        connection_status = contract_service.get_connection_status()
+        
+        if connection_status["connected"] and connection_status["contracts"]["task_manager"]:
+            # 从区块链获取已完成任务
+            tasks_result = contract_service.get_all_tasks()
+            if tasks_result.get("success") and tasks_result.get("tasks"):
+                from datetime import datetime, timedelta
+                threshold_time = datetime.fromisoformat(pending_info["threshold_time"].replace('Z', '+00:00'))
+                
+                for task in tasks_result["tasks"]:
+                    if (task.get("status") == "completed" and 
+                        task.get("task_id") not in evaluated_task_ids):
+                        
+                        # 检查任务完成时间是否超过2天
+                        completed_at = task.get("completed_at")
+                        if completed_at:
+                            try:
+                                completed_datetime = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                                if completed_datetime < threshold_time:
+                                    completed_tasks.append(task)
+                            except ValueError:
+                                logger.warning(f"Invalid completed_at format for task {task.get('task_id')}: {completed_at}")
+                                continue
+        
+        logger.info(f"Found {len(completed_tasks)} tasks pending auto-evaluation")
+        
+        # 自动评价每个任务
+        auto_evaluated = []
+        for task in completed_tasks:
+            try:
+                task_id = task.get("task_id")
+                
+                # 获取任务的协作结果来评估完成质量
+                collaboration_result = None
+                try:
+                    collaboration_result = collaboration_db_service.get_task_collaboration_result(task_id)
+                except:
+                    pass  # 如果没有协作结果，使用默认评分
+                
+                # 基于任务完成情况进行自动评分
+                auto_rating = 3  # 默认中等评分
+                auto_success = True
+                auto_notes = "Automatic evaluation after 2 days - task completed without user feedback"
+                
+                # 如果有协作结果，尝试基于结果质量调整评分
+                if collaboration_result and collaboration_result.get("success"):
+                    auto_rating = 4  # 有成功的协作结果，提高评分
+                    auto_notes = "Automatic evaluation - task completed successfully with collaboration result"
+                
+                # 构建自动评价数据
+                evaluation_data = {
+                    "success": auto_success,
+                    "rating": auto_rating,
+                    "evaluator": "system",
+                    "notes": auto_notes,
+                    "auto_evaluation": True
+                }
+                
+                # 调用评价函数
+                result = await evaluate_task(task_id, evaluation_data)
+                
+                if result.get("success"):
+                    auto_evaluated.append({
+                        "task_id": task_id,
+                        "title": task.get("title", "Unknown"),
+                        "rating": auto_rating,
+                        "agents_updated": result.get("data", {}).get("total_agents_updated", 0)
+                    })
+                    logger.info(f"✅ Auto-evaluated task {task_id} with rating {auto_rating}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to auto-evaluate task {task.get('task_id')}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "message": f"Auto-evaluation completed. {len(auto_evaluated)} tasks evaluated.",
+            "data": {
+                "total_pending": len(completed_tasks),
+                "auto_evaluated": len(auto_evaluated),
+                "evaluated_tasks": auto_evaluated,
+                "threshold_days": 2
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in auto-evaluation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{task_id}/evaluation-status", response_model=Dict[str, Any])
+async def get_task_evaluation_status(task_id: str):
+    """
+    获取任务的评价状态
+    """
+    try:
+        evaluation_check = collaboration_db_service.check_task_evaluation_exists(task_id)
+        return {
+            "success": True,
+            "task_id": task_id,
+            "evaluation_status": evaluation_check
+        }
+    except Exception as e:
+        logger.error(f"❌ Error checking evaluation status for task {task_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{task_id}/bid", response_model=Dict[str, Any])
@@ -1841,57 +1960,186 @@ async def get_task_history(task_id: str):
     """
     获取任务的历史记录。
     """
-    # 检查任务是否存在
+    # 检查任务是否存在（先检查区块链，再检查mock数据）
     task_exists = False
-    for task in mock_tasks:
-        if task["task_id"] == task_id:
+    
+    # 尝试从区块链获取任务
+    try:
+        task_result = contract_service.get_task(task_id)
+        if task_result.get("success"):
             task_exists = True
-            break
+    except Exception as e:
+        logger.debug(f"Could not get task {task_id} from blockchain: {e}")
+    
+    # 如果区块链中没有，检查mock数据
+    if not task_exists:
+        for task in mock_tasks:
+            if task["task_id"] == task_id:
+                task_exists = True
+                break
     
     if not task_exists:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # 模拟任务历史记录
-    mock_history = [
-        {
-            "event": "created",
-            "timestamp": "2023-08-10T09:15:00Z",
-            "actor": "0x9876543210987654321098765432109876543210",
-            "details": "Task created with reward of 0.5 ETH"
-        },
-        {
-            "event": "bid_placed",
-            "timestamp": "2023-08-10T10:30:00Z",
-            "actor": "0x1234567890123456789012345678901234567890",
-            "details": "Bid placed for 0.45 ETH"
-        },
-        {
-            "event": "bid_placed",
-            "timestamp": "2023-08-10T11:15:00Z",
-            "actor": "0x3456789012345678901234567890123456789012",
-            "details": "Bid placed for 0.5 ETH"
-        },
-        {
-            "event": "assigned",
-            "timestamp": "2023-08-11T09:00:00Z",
-            "actor": "0x9876543210987654321098765432109876543210",
-            "details": "Task assigned to agent 0x1234567890123456789012345678901234567890"
-        }
-    ]
+    # 获取真实的区块链历史事件
+    real_history = []
     
-    # 如果任务已完成，添加完成记录
-    for task in mock_tasks:
-        if task["task_id"] == task_id and task["status"] == "completed" and task.get("completed_at"):
-            mock_history.append({
-                "event": "completed",
-                "timestamp": task["completed_at"],
-                "actor": task.get("assigned_agent", "unknown"),
-                "details": f"Task completed with result: {task.get('result', 'No result provided')}"
-            })
+    # 首先尝试从区块链获取真实的任务历史
+    try:
+        if contract_service.w3 and contract_service.w3.is_connected():
+            blockchain_history = contract_service.get_task_history(task_id)
+            if blockchain_history.get("success") and blockchain_history.get("history"):
+                for event in blockchain_history["history"]:
+                    # 转换区块链事件格式为统一格式
+                    timestamp = event.get('timestamp')
+                    if isinstance(timestamp, int):
+                        # 区块号格式，保持为区块号显示
+                        timestamp_str = f"Block #{timestamp}"
+                    else:
+                        # 已经是时间戳格式
+                        timestamp_str = str(timestamp)
+                    
+                    real_history.append({
+                        "event": event.get("type", "unknown"),
+                        "timestamp": timestamp_str,
+                        "actor": event.get("details", {}).get("creator") or event.get("details", {}).get("agent") or "unknown",
+                        "details": event.get("description", ""),
+                        "blockchain_data": event.get("details", {})
+                    })
+                logger.info(f"✅ Retrieved {len(real_history)} real blockchain events for task {task_id}")
+    except Exception as e:
+        logger.warning(f"Could not get blockchain history for task {task_id}: {e}")
+    
+    # 如果没有区块链数据，使用基础mock数据作为fallback
+    if not real_history:
+        real_history = [
+            {
+                "event": "created",
+                "timestamp": "2023-08-10T09:15:00Z", 
+                "actor": "unknown",
+                "details": "Task created (blockchain data not available)"
+            }
+        ]
+    
+    # 如果任务已完成，添加完成记录（如果区块链历史中没有的话）
+    has_completion = any(event.get("event") == "task_completed" or event.get("event") == "completed" for event in real_history)
+    
+    if not has_completion:
+        for task in mock_tasks:
+            if task["task_id"] == task_id and task["status"] == "completed" and task.get("completed_at"):
+                real_history.append({
+                    "event": "completed",
+                    "timestamp": task["completed_at"],
+                    "actor": task.get("assigned_agent", "unknown"),
+                    "details": f"Task completed with result: {task.get('result', 'No result provided')}"
+                })
+    
+    # 添加真实的评价事件
+    try:
+        # 获取所有评价事件，然后过滤出当前任务的事件
+        evaluation_events = collaboration_db_service.get_blockchain_events(
+            event_type="task_evaluation", 
+            limit=100  # 获取更多事件以确保包含相关的
+        )
+        
+        for eval_event in evaluation_events:
+            event_data = eval_event.get('data') or eval_event.get('event_data') or {}
+            if isinstance(event_data, str):
+                import json
+                try:
+                    event_data = json.loads(event_data)
+                except:
+                    event_data = {}
+            
+            # 只添加与当前任务相关的评价事件
+            if event_data.get('task_id') == task_id:
+                evaluator = event_data.get('evaluator', 'user')
+                rating = event_data.get('rating', 'N/A')
+                agent_id = eval_event.get('agent_id', 'unknown')
+                timestamp = eval_event.get('timestamp')
+                
+                if timestamp:
+                    timestamp_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+                else:
+                    timestamp_str = eval_event.get('created_at', 'unknown')
+                
+                # 获取区块信息，如果没有则使用最新的区块号
+                block_number = eval_event.get('block_number')
+                transaction_hash = eval_event.get('transaction_hash', 'unknown')
+                
+                # 如果没有区块号，尝试获取当前最新区块号
+                if not block_number or block_number == 'None':
+                    try:
+                        if contract_service.w3 and contract_service.w3.is_connected():
+                            latest_block = contract_service.w3.eth.get_block('latest')
+                            block_number = latest_block.number
+                    except Exception as e:
+                        # 如果获取失败，使用一个默认的高区块号确保评价事件排在后面
+                        block_number = 999999
+                
+                real_history.append({
+                    "event": "evaluated", 
+                    "timestamp": f"Block #{block_number}",
+                    "actor": agent_id,
+                    "details": f"Task evaluated by {evaluator} with rating {rating}/5 for agent {agent_id[:10]}...",
+                    "evaluation_data": {
+                        "evaluator": evaluator,
+                        "rating": rating,
+                        "agent_id": agent_id,
+                        "reward": event_data.get('reward', 0),
+                        "reputation_change": event_data.get('reputation_change', 0)
+                    },
+                    "blockchain_data": {
+                        "block_number": block_number,
+                        "transaction_hash": transaction_hash
+                    }
+                })
+        
+        logger.info(f"Added {len(evaluation_events)} evaluation events to task {task_id} history")
+        
+    except Exception as e:
+        logger.warning(f"Failed to get evaluation events for task {task_id}: {e}")
+    
+    # 按区块号和事件类型排序历史记录
+    def sort_key(event):
+        timestamp = event['timestamp']
+        event_type = event['event']
+        
+        # 提取区块号
+        if 'Block #' in str(timestamp):
+            try:
+                block_num = int(str(timestamp).replace('Block #', ''))
+            except:
+                block_num = 999999  # 无法解析的放到最后
+        else:
+            block_num = 999999  # 非区块格式的放到最后
+        
+        # 事件类型排序优先级（同一个区块内的排序）
+        event_priority = {
+            'task_created': 1,
+            'collaboration_started': 2, 
+            'task_assigned': 3,
+            'task_completed': 4,
+            'evaluated': 5  # 评价事件在完成事件之后
+        }
+        
+        priority = event_priority.get(event_type, 6)
+        
+        return (block_num, priority)
+    
+    try:
+        real_history.sort(key=sort_key)
+    except Exception as e:
+        logger.warning(f"Failed to sort history by block and event type: {e}")
     
     return {
-        "task_id": task_id,
-        "history": mock_history
+        "success": True,
+        "data": {
+            "task_id": task_id,
+            "history": real_history,
+            "total_events": len(real_history),
+            "data_source": "blockchain + evaluation_events"
+        }
     }
 
 @router.post("/{task_id}/start-real-collaboration", response_model=Dict[str, Any])

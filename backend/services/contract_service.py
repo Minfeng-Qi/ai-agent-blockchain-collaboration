@@ -17,13 +17,13 @@ except ImportError:
 
 # 自动生成的合约地址 (checksum格式)
 contract_addresses = {
-    "AgentRegistry": "0x88bcFA1F0d0E8E74a7D327A8A7F68704473F8F55",
-    "ActionLogger": "0x235E7aDAE4109647C940E6388D9fe135BDBB5684",
-    "IncentiveEngine": "0x6aaf4B04A410a4f4C0d29CA5FB85BDAD8ecC5620",
-    "TaskManager": "0xCd967DCB14F76006a3c031CFf233Bf1C0E50a336",
-    "BidAuction": "0x35AA246bFB38787A5692dC72B4132171ab694B2F",
-    "MessageHub": "0x6a73b34f09934bE58B373f90E2c7289C757cEe1F",
-    "Learning": "0xDd1b3F77D3e153ABEC3748b974be79dC80FCBd45",
+    "AgentRegistry": "0x2503984a31c8778e14Eb6802e5eDEf80D462Cc5E",
+    "ActionLogger": "0x652A623378c0b2Acc0D1f89Ac2BBf5f125F54193",
+    "IncentiveEngine": "0x0cf722de0b2e729305b5bc9330D5Bc3Aa788a9bF",
+    "TaskManager": "0x2583C472CF856025107749c74b1733EaFA5E463e",
+    "BidAuction": "0xEF5e7210eA94D8cb7ebd17e3f599e501d41049A4",
+    "MessageHub": "0x6738A783D56271eFE8EB94C4854430d1Fe8357a3",
+    "Learning": "0x64b570637a799502aa333DBcF103CfFefB64e68B",
 }
 
 # 配置

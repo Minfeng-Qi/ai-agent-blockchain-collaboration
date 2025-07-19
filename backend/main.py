@@ -285,6 +285,43 @@ async def system_stats():
             "timestamp": datetime.now().isoformat()
         }
 
+@app.post("/scheduled/auto-evaluate")
+async def scheduled_auto_evaluate():
+    """
+    定时任务：自动评价超期未评价的任务
+    
+    这个端点可以被外部调度器调用，比如 cron job 或者其他定时任务系统
+    建议每天运行一次
+    """
+    try:
+        logger.info("🕐 Running scheduled auto-evaluation task...")
+        
+        # 调用任务路由中的自动评价端点
+        from routers.tasks import auto_evaluate_overdue_tasks
+        result = await auto_evaluate_overdue_tasks()
+        
+        # 记录结果
+        if result.get("success"):
+            evaluated_count = result.get("data", {}).get("auto_evaluated", 0)
+            logger.info(f"✅ Scheduled auto-evaluation completed: {evaluated_count} tasks evaluated")
+        else:
+            logger.warning(f"⚠️ Scheduled auto-evaluation failed: {result.get('message', 'Unknown error')}")
+        
+        return {
+            "scheduled_task": "auto_evaluate",
+            "timestamp": datetime.now().isoformat(),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in scheduled auto-evaluation: {str(e)}")
+        return {
+            "scheduled_task": "auto_evaluate", 
+            "timestamp": datetime.now().isoformat(),
+            "success": False,
+            "error": str(e)
+        }
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动时的初始化"""

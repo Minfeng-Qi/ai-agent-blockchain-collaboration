@@ -639,6 +639,132 @@ class CollaborationDBService:
             return []
         finally:
             db.close()
+    
+    def check_task_evaluation_exists(self, task_id: str) -> Dict[str, Any]:
+        """
+        检查任务是否已经被评价过
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            包含评价状态信息的字典
+        """
+        db = self.get_db()
+        try:
+            # 查找与该任务相关的评价事件
+            evaluations = db.query(BlockchainEvent).filter(
+                BlockchainEvent.event_type == "task_evaluation"
+            ).all()
+            
+            # 检查事件数据中的task_id
+            task_evaluations = []
+            for event in evaluations:
+                event_data = json.loads(event.data) if event.data else {}
+                if event_data.get("task_id") == task_id:
+                    task_evaluations.append({
+                        "event_id": event.event_id,
+                        "agent_id": event.agent_id,
+                        "evaluator": event_data.get("evaluator", "unknown"),
+                        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                        "rating": event_data.get("rating", 0)
+                    })
+            
+            return {
+                "evaluated": len(task_evaluations) > 0,
+                "evaluation_count": len(task_evaluations),
+                "evaluations": task_evaluations,
+                "last_evaluation": task_evaluations[0] if task_evaluations else None
+            }
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error checking task evaluation: {e}")
+            return {"evaluated": False, "evaluation_count": 0, "evaluations": []}
+        finally:
+            db.close()
+    
+    def get_tasks_pending_evaluation(self, days_threshold: int = 2) -> List[Dict[str, Any]]:
+        """
+        获取超过指定天数未评价的已完成任务
+        
+        Args:
+            days_threshold: 天数阈值，默认2天
+            
+        Returns:
+            待评价任务列表
+        """
+        from datetime import datetime, timedelta
+        
+        db = self.get_db()
+        try:
+            # 计算阈值时间
+            threshold_time = datetime.utcnow() - timedelta(days=days_threshold)
+            
+            # 查找所有评价事件
+            evaluations = db.query(BlockchainEvent).filter(
+                BlockchainEvent.event_type == "task_evaluation"
+            ).all()
+            
+            # 提取已评价的任务ID
+            evaluated_task_ids = set()
+            for event in evaluations:
+                event_data = json.loads(event.data) if event.data else {}
+                task_id = event_data.get("task_id")
+                if task_id:
+                    evaluated_task_ids.add(task_id)
+            
+            logger.info(f"Found {len(evaluated_task_ids)} already evaluated tasks")
+            
+            # 返回基础信息，调用方需要与区块链服务配合获取完整的任务列表
+            return {
+                "evaluated_task_ids": list(evaluated_task_ids),
+                "threshold_time": threshold_time.isoformat(),
+                "days_threshold": days_threshold
+            }
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting pending evaluations: {e}")
+            return {"evaluated_task_ids": [], "threshold_time": threshold_time.isoformat(), "days_threshold": days_threshold}
+        finally:
+            db.close()
+    
+    def get_task_collaboration_result(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取任务的协作结果
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            协作结果或None
+        """
+        db = self.get_db()
+        try:
+            # 查找任务相关的协作结果
+            result = db.query(CollaborationResult).filter(
+                CollaborationResult.task_id == task_id
+            ).first()
+            
+            if result:
+                return {
+                    "task_id": result.task_id,
+                    "conversation_id": result.conversation_id,
+                    "final_result": result.final_result,
+                    "conversation_summary": result.conversation_summary,
+                    "participants": result.participants,
+                    "message_count": result.message_count,
+                    "success": result.success,
+                    "created_at": result.created_at.isoformat() if result.created_at else None,
+                    "ipfs_cid": result.final_result  # 假设final_result包含IPFS CID
+                }
+            
+            return None
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting task collaboration result: {e}")
+            return None
+        finally:
+            db.close()
 
 
 # 全局服务实例
