@@ -90,8 +90,19 @@ class AgentCollaborationService:
         """
         collaboration_id = f"collab_{uuid.uuid4().hex}"
         
-        # 自动选择合适的代理
-        selected_agents = await self._select_best_agents_for_task(task_data)
+        # 检查任务是否已经分配给特定的agent
+        if task_data.get("assigned_agent"):
+            # 单agent任务：使用已分配的agent
+            selected_agents = [task_data["assigned_agent"]]
+            logger.info(f"Using assigned agent for task {task_id}: {task_data['assigned_agent']}")
+        elif task_data.get("assigned_agents"):
+            # 多agent任务：使用已分配的agents
+            selected_agents = task_data["assigned_agents"]
+            logger.info(f"Using assigned agents for task {task_id}: {selected_agents}")
+        else:
+            # 自动选择合适的代理
+            selected_agents = await self._select_best_agents_for_task(task_data)
+            logger.info(f"Auto-selected agents for task {task_id}: {selected_agents}")
         
         # 初始化协作数据结构
         collaboration = {
@@ -127,9 +138,29 @@ class AgentCollaborationService:
         logger.info(f"Running collaboration {collaboration_id}")
         
         try:
-            # 获取选定的代理
-            selected_agents = await self._select_best_agents_for_task(task_data)
-            agents_info = await self._get_agents_info(selected_agents)
+            # 获取选定的代理 - 使用与create_collaboration相同的逻辑
+            if task_data.get("assigned_agent"):
+                # 单agent任务：使用已分配的agent
+                selected_agents = [task_data["assigned_agent"]]
+                logger.info(f"Using assigned agent for collaboration {collaboration_id}: {task_data['assigned_agent']}")
+                agents_info = await self._get_agents_info(selected_agents)
+            elif task_data.get("assigned_agents"):
+                # 多agent任务：使用已分配的agents
+                assigned_agents = task_data["assigned_agents"]
+                logger.info(f"Using assigned agents for collaboration {collaboration_id}: {assigned_agents}")
+                
+                # 检查assigned_agents的格式
+                if assigned_agents and isinstance(assigned_agents[0], dict):
+                    # 如果是字典列表，直接使用
+                    agents_info = assigned_agents
+                else:
+                    # 如果是ID列表，通过_get_agents_info获取详细信息
+                    agents_info = await self._get_agents_info(assigned_agents)
+            else:
+                # 自动选择合适的代理
+                selected_agents = await self._select_best_agents_for_task(task_data)
+                logger.info(f"Auto-selected agents for collaboration {collaboration_id}: {selected_agents}")
+                agents_info = await self._get_agents_info(selected_agents)
             
             # 创建系统消息
             system_message = self._create_system_message(task_data, agents_info)
@@ -190,7 +221,10 @@ class AgentCollaborationService:
             tx_hash = await self._record_to_blockchain(collaboration_id, ipfs_cid, task_data.get("task_id", ""))
             
             # 更新代理信息（调用合约中的学习算法）
-            agent_updates = await self._update_agents_after_collaboration(agents_info, conversation, task_data)
+            # 如果是实时API调用，collaboration_state可能不存在，使用空状态
+            if 'collaboration_state' not in locals():
+                collaboration_state = {"agent_responses": []}
+            agent_updates = await self._update_agents_after_collaboration(agents_info, conversation, task_data, collaboration_state)
             
             # 返回结果
             result = {
@@ -320,19 +354,29 @@ class AgentCollaborationService:
     
     async def _get_agents_info(self, agent_ids: List[str]) -> List[Dict]:
         """获取代理信息"""
-        # 在实际系统中，这里会从数据库或区块链获取代理信息
-        # 这里我们生成模拟数据
         agents = []
-        capabilities = ["data_analysis", "text_generation", "classification", 
-                        "translation", "summarization", "image_recognition"]
         
         for i, agent_id in enumerate(agent_ids):
-            agents.append({
-                "agent_id": agent_id,
-                "name": f"Agent{i+1}",
-                "capabilities": [capabilities[i % len(capabilities)]],
-                "reputation": 80 + (i % 20)
-            })
+            # 检查是否是真实的以太坊地址
+            if agent_id.startswith('0x') and len(agent_id) == 42:
+                # 对于真实地址，使用简化的agent信息
+                # TODO: 将来可以从区块链AgentRegistry获取真实信息
+                agents.append({
+                    "agent_id": agent_id,
+                    "name": f"Agent_{agent_id[-8:]}",  # 使用地址后8位作为名称
+                    "capabilities": ["general"],  # 默认能力
+                    "reputation": 80  # 默认声誉
+                })
+            else:
+                # 对于模拟的agent ID，生成模拟数据
+                capabilities = ["data_analysis", "text_generation", "classification", 
+                                "translation", "summarization", "image_recognition"]
+                agents.append({
+                    "agent_id": agent_id,
+                    "name": f"Agent{i+1}",
+                    "capabilities": [capabilities[i % len(capabilities)]],
+                    "reputation": 80 + (i % 20)
+                })
         
         return agents
     
@@ -343,7 +387,24 @@ class AgentCollaborationService:
             for i, agent in enumerate(agents)
         ])
         
-        system_message = f"""You will simulate a collaborative conversation between multiple AI agents working together to solve a task.
+        if len(agents) == 1:
+            # 单agent任务的提示词
+            agent = agents[0]
+            system_message = f"""You are working as {agent['name']}, an AI agent specialized in {', '.join(agent['capabilities'])}.
+Your reputation score is {agent['reputation']}, indicating your expertise level.
+
+Task Details:
+Title: {task_data.get('title', 'Not specified')}
+Description: {task_data.get('description', 'Not specified')}
+Requirements: {task_data.get('requirements', 'Not specified')}
+
+Please work on this task using your specialized capabilities. Provide a comprehensive solution that demonstrates your expertise.
+Your response should be structured and professional, showing your analytical thinking and problem-solving approach.
+
+Format your response as {agent['name']}: [your solution]"""
+        else:
+            # 多agent协作任务的提示词
+            system_message = f"""You will simulate a collaborative conversation between multiple AI agents working together to solve a task.
 These agents have different specialties and capabilities, and need to collaborate effectively to complete the task.
 
 Participating Agents:
@@ -510,34 +571,33 @@ When the task is completed, clearly indicate "Task Completed" and provide the fi
                 "collaboration_quality": 0
             }
             
-            # Enhanced conversation flow with better coordination
-            for round_num in range(3):  # Reduced rounds for faster testing
-                current_agent = agents_info[round_num % len(agents_info)]
-                agent_id = current_agent["agent_id"]
-                agent_name = current_agent["name"]
-                agent_caps = current_agent["capabilities"]
+            # Enhanced multi-agent collaboration - ensure ALL agents participate
+            num_agents = len(agents_info)
+            logger.info(f"🤝 Starting collaboration with {num_agents} agents: {[agent['name'] for agent in agents_info]}")
+            
+            # Phase 1: Initial contributions from ALL agents
+            logger.info("📝 Phase 1: Initial contributions from all agents")
+            for i, agent in enumerate(agents_info):
+                agent_id = agent["agent_id"]
+                agent_name = agent["name"]
+                agent_caps = agent["capabilities"]
                 
-                # Create context-aware agent prompt
-                collaboration_context = self._build_collaboration_context(
-                    collaboration_state, agents_info, round_num
-                )
-                
+                # Create context-aware agent prompt for initial contribution
                 agent_prompt = f"""You are {agent_name}, specializing in {', '.join(agent_caps)}.
-You are collaborating with other agents to complete this task:
+You are collaborating with {num_agents-1} other agents to complete this task:
 
 Task: {task_data.get('title', '')}
 Description: {task_data.get('description', '')}
-Progress: {(round_num + 1) * 14}%
 
-{collaboration_context}
+Other agents in this collaboration: {[a['name'] for a in agents_info if a['name'] != agent_name]}
 
-Based on the above context and your expertise, please:
-1. Contribute your specialized knowledge
-2. Build upon other agents' work
-3. Ask questions if you need clarification
-4. Provide concrete, actionable solutions
+As the expert in {', '.join(agent_caps)}, please provide your initial analysis and contribution to this task. Focus on:
+1. How your expertise applies to this specific task
+2. Your proposed approach or solution from your domain perspective
+3. Key considerations or challenges you foresee
+4. What you'll need from other agents to succeed
 
-Respond as yourself, showing your professional expertise and collaborative spirit.
+This is your initial contribution - be specific and actionable.
 """
                 
                 # Get agent response
@@ -547,10 +607,15 @@ Respond as yourself, showing your professional expertise and collaborative spiri
                     "content": agent_prompt
                 })
                 
-                response = await self._call_openai_api(agent_conversation)
+                try:
+                    response = await self._call_openai_api(agent_conversation)
+                    logger.info(f"✅ Agent {agent_name} provided initial contribution")
+                except Exception as e:
+                    logger.error(f"❌ Agent {agent_name} failed to respond: {str(e)}")
+                    response = f"[Agent {agent_name} encountered an error and could not contribute. This agent will be penalized.]"
                 
                 # Format and add response
-                formatted_response = f"{agent_name}: {response}"
+                formatted_response = f"**{agent_name}** (Initial Contribution): {response}"
                 conversation.append({
                     "role": "assistant", 
                     "content": formatted_response
@@ -559,19 +624,75 @@ Respond as yourself, showing your professional expertise and collaborative spiri
                 # Update collaboration state
                 collaboration_state["agent_responses"].append({
                     "agent": agent_name,
-                    "round": round_num,
-                    "response": response
+                    "agent_id": agent_id,
+                    "phase": "initial",
+                    "response": response,
+                    "success": "error" not in response.lower()
                 })
                 
-                # Add coordination prompts every few rounds
-                if round_num == 3:
-                    coordination_prompt = "Let's coordinate our efforts. Please review what each agent has contributed so far and plan the next steps together."
-                    conversation.append({
-                        "role": "user", 
-                        "content": coordination_prompt
-                    })
+                await asyncio.sleep(0.3)  # Brief pause between agents
+            
+            # Phase 2: Collaborative refinement - ALL agents build on each other's work
+            logger.info("🔄 Phase 2: Collaborative refinement from all agents")
+            for i, agent in enumerate(agents_info):
+                agent_id = agent["agent_id"]
+                agent_name = agent["name"]
+                agent_caps = agent["capabilities"]
                 
-                await asyncio.sleep(0.5)  # Reduced sleep time
+                # Get other agents' contributions for context
+                other_contributions = [resp for resp in collaboration_state["agent_responses"] 
+                                     if resp["agent"] != agent_name and resp["success"]]
+                
+                collaboration_context = ""
+                if other_contributions:
+                    collaboration_context = "\nOther agents' contributions so far:\n"
+                    for contrib in other_contributions[-3:]:  # Last 3 successful contributions
+                        collaboration_context += f"- {contrib['agent']}: {contrib['response'][:150]}...\n"
+                
+                agent_prompt = f"""You are {agent_name}, continuing your collaboration.
+
+{collaboration_context}
+
+Now that you've seen other agents' contributions, please:
+1. Build upon and integrate with other agents' ideas
+2. Refine your approach based on their input
+3. Address any gaps or challenges identified by the team
+4. Propose next steps for the collaborative solution
+
+Focus on creating synergy between all agents' expertise to deliver the best result.
+"""
+                
+                # Get agent response
+                agent_conversation = conversation.copy()
+                agent_conversation.append({
+                    "role": "user", 
+                    "content": agent_prompt
+                })
+                
+                try:
+                    response = await self._call_openai_api(agent_conversation)
+                    logger.info(f"✅ Agent {agent_name} provided refinement")
+                except Exception as e:
+                    logger.error(f"❌ Agent {agent_name} failed in refinement: {str(e)}")
+                    response = f"[Agent {agent_name} encountered an error during refinement. This agent will be penalized.]"
+                
+                # Format and add response
+                formatted_response = f"**{agent_name}** (Refinement): {response}"
+                conversation.append({
+                    "role": "assistant", 
+                    "content": formatted_response
+                })
+                
+                # Update collaboration state
+                collaboration_state["agent_responses"].append({
+                    "agent": agent_name,
+                    "agent_id": agent_id,
+                    "phase": "refinement",
+                    "response": response,
+                    "success": "error" not in response.lower()
+                })
+                
+                await asyncio.sleep(0.3)  # Brief pause between agents
             
             # Final integration and summary
             integration_prompt = f"""Please provide a comprehensive summary of this multi-agent collaboration:
@@ -666,42 +787,77 @@ Ensure the final result is complete, coherent, and actionable.
             logger.error(f"Error recording to blockchain: {str(e)}")
             return "0x" + uuid.uuid4().hex[:64]
     
-    async def _update_agents_after_collaboration(self, agents_info: List[Dict], conversation: List[Dict], task_data: Dict) -> List[Dict]:
+    async def _update_agents_after_collaboration(self, agents_info: List[Dict], conversation: List[Dict], task_data: Dict, collaboration_state: Dict) -> List[Dict]:
         """
         协作完成后更新代理信息（调用合约中的学习算法）
+        增加对失败/掉线agents的惩罚机制
         """
         agent_updates = []
         sender_address = os.environ.get('AGENT_ADDRESS', '0x0000000000000000000000000000000000000000')
         
         try:
+            # 统计每个agent的参与情况
+            agent_performance = {}
+            
             for agent in agents_info:
                 agent_id = agent['agent_id']
+                agent_name = agent['name']
                 
-                # 计算简单的表现分数（基于对话参与度）
-                agent_message_count = 0
-                agent_total_length = 0
+                # 从collaboration_state获取详细的参与信息
+                agent_responses = [resp for resp in collaboration_state["agent_responses"] 
+                                 if resp["agent_id"] == agent_id]
                 
-                for msg in conversation:
-                    if msg.get('role') == 'assistant':
-                        content = msg.get('content', '')
-                        # 简单检查是否是该代理的消息
-                        if any(pattern in content for pattern in [f"Agent{i+1}" for i in range(4)]):
-                            agent_message_count += 1
-                            agent_total_length += len(content)
+                # 计算性能指标
+                total_responses = len(agent_responses)
+                successful_responses = len([resp for resp in agent_responses if resp["success"]])
+                failed_responses = total_responses - successful_responses
                 
-                # 基于参与度计算表现分数 (0-100)
-                participation_score = min(100, (agent_message_count * 20) + (agent_total_length / 10))
+                # 计算参与质量分数
+                if total_responses > 0:
+                    success_rate = successful_responses / total_responses
+                    participation_score = success_rate * 100  # 基础分数：成功率
+                    
+                    # 额外奖励：完整参与两个阶段
+                    phases_participated = len(set(resp["phase"] for resp in agent_responses if resp["success"]))
+                    if phases_participated >= 2:  # 参与了initial和refinement阶段
+                        participation_score += 20  # 完整参与奖励
+                    
+                    # 惩罚：失败响应
+                    participation_score -= failed_responses * 30  # 每次失败扣30分
+                    
+                    # 确保分数在合理范围内
+                    participation_score = max(0, min(100, participation_score))
+                else:
+                    # 完全没有参与的agent
+                    participation_score = 0
+                    failed_responses = 2  # 视为两次失败（初始和精炼阶段）
+                
+                agent_performance[agent_id] = {
+                    "agent_name": agent_name,
+                    "participation_score": participation_score,
+                    "total_responses": total_responses,
+                    "successful_responses": successful_responses,
+                    "failed_responses": failed_responses,
+                    "success_rate": success_rate if total_responses > 0 else 0,
+                    "status": "active" if successful_responses > 0 else "failed/offline"
+                }
+                
+                logger.info(f"🔍 Agent {agent_name} performance: Score={participation_score:.1f}, Success={successful_responses}/{total_responses}, Status={agent_performance[agent_id]['status']}")
                 
                 # 调用合约的学习事件记录功能来更新代理
                 learning_data = {
                     "collaboration_id": task_data.get("task_id", ""),
                     "performance_score": participation_score,
                     "task_type": task_data.get("type", "general"),
-                    "agent_contributions": agent_message_count,
+                    "agent_contributions": successful_responses,
+                    "failed_attempts": failed_responses,
                     "quality_metrics": {
-                        "message_count": agent_message_count,
-                        "total_content_length": agent_total_length,
-                        "average_message_length": agent_total_length / max(1, agent_message_count)
+                        "total_responses": total_responses,
+                        "successful_responses": successful_responses,
+                        "failed_responses": failed_responses,
+                        "success_rate": success_rate if total_responses > 0 else 0,
+                        "phases_participated": len(set(resp["phase"] for resp in agent_responses if resp["success"])),
+                        "status": agent_performance[agent_id]["status"]
                     }
                 }
                 

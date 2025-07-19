@@ -80,10 +80,27 @@ async def startup_event():
     """应用启动时的初始化"""
     logger.info("🚀 Starting Agent Learning System...")
     
-    # 启动后台任务执行器
-    logger.info("Starting background task executor...")
-    await start_background_executor()
-    logger.info("✅ Background task executor started")
+    # 初始化后端服务
+    logger.info("Initializing backend services...")
+    
+    # 初始化Web3连接
+    try:
+        contract_service.init_web3()
+        logger.info("Web3 connection initialized successfully")
+    except Exception as e:
+        logger.warning(f"Web3 initialization failed: {e}")
+    
+    # 初始化智能合约
+    try:
+        contract_service.initialize_contracts()
+        logger.info("Smart contracts initialized successfully")
+    except Exception as e:
+        logger.warning(f"Contract initialization failed: {e}")
+    
+    # 暂时禁用后台任务执行器进行调试
+    # logger.info("Starting background task executor...")
+    # await start_background_executor()
+    # logger.info("✅ Background task executor started")
 
 @app.get("/")
 async def root():

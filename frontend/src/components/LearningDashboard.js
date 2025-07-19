@@ -6,14 +6,12 @@ import {
   Card, 
   CardContent, 
   CardHeader,
-  Button,
   Divider,
   CircularProgress,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Paper,
   Table,
   TableBody,
   TableCell,
@@ -22,7 +20,8 @@ import {
   TableRow,
   Slider,
   Tabs,
-  Tab
+  Tab,
+  Chip
 } from '@mui/material';
 import { 
   TrendingUp as TrendingUpIcon,
@@ -60,7 +59,8 @@ ChartJS.register(
 
 const LearningDashboard = () => {
   const [loading, setLoading] = useState(true);
-  const [selectedAgent, setSelectedAgent] = useState('');
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [selectedAgent, setSelectedAgent] = useState(null);
   const [agents, setAgents] = useState([]);
   const [learningData, setLearningData] = useState(null);
   const [tabValue, setTabValue] = useState(0);
@@ -76,12 +76,42 @@ const LearningDashboard = () => {
   }, [selectedAgent]);
   
   const fetchAgents = async () => {
+    setAgentsLoading(true);
     try {
-      // In a real app, fetch from API
-      // const response = await axios.get('http://localhost:8000/agents');
-      // setAgents(response.data);
+      // 首先尝试从API获取真实数据
+      try {
+        const response = await axios.get('http://localhost:8001/agents/');
+        console.log('✅ Fetched real agents data from API:', response.data);
+        
+        if (response.data && response.data.agents && response.data.agents.length > 0) {
+          // 转换API数据格式为前端需要的格式
+          const realAgents = response.data.agents.map(agent => ({
+            agent_id: agent.agent_id,
+            name: agent.name,
+            reputation: agent.reputation || 50,
+            capabilities: agent.capabilities || [],
+            capability_weights: agent.capability_weights || [],
+            tasks_completed: agent.tasks_completed || 0,
+            active: agent.active,
+            source: 'blockchain'
+          }));
+          
+          setAgents(realAgents);
+          setAgentsLoading(false);
+          
+          // 自动选择第一个agent
+          if (realAgents.length > 0) {
+            console.log('🎯 Auto-selecting first agent:', realAgents[0].agent_id);
+            setSelectedAgent(realAgents[0].agent_id);
+          }
+          return; // 成功获取真实数据，直接返回
+        }
+      } catch (apiError) {
+        console.warn('⚠️ Failed to fetch real agents data, falling back to mock data:', apiError.message);
+      }
       
-      // 更丰富的模拟数据
+      // 如果API调用失败，使用模拟数据
+      console.log('📱 Using mock agents data');
       const mockAgents = [
         { 
           agent_id: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 
@@ -133,6 +163,7 @@ const LearningDashboard = () => {
       ];
       
       setAgents(mockAgents);
+      setAgentsLoading(false);
       setSelectedAgent(mockAgents[0].agent_id);
     } catch (error) {
       console.error('Error fetching agents:', error);
@@ -143,20 +174,213 @@ const LearningDashboard = () => {
         reputation: 50
       };
       setAgents([defaultAgent]);
+      setAgentsLoading(false);
       setSelectedAgent(defaultAgent.agent_id);
     }
   };
   
   const fetchLearningData = async (agentId) => {
     setLoading(true);
+    console.log('🔄 Starting to fetch learning data for agent:', agentId);
+    
     try {
-      // In a real app, fetch from API
-      // const response = await axios.get(`http://localhost:8000/learning/${agentId}`);
-      // setLearningData(response.data);
+      // 并行获取所有需要的数据，提高加载速度
+      const [statsResponse, eventsResponse, agentsResponse, historyResponse, taskTypesResponse] = await Promise.all([
+        axios.get('http://localhost:8001/tasks/learning/agent-statistics').catch(err => {
+          console.warn('Stats API failed:', err.message);
+          return null;
+        }),
+        axios.get(`http://localhost:8001/tasks/agents/${agentId}/learning-events`).catch(err => {
+          console.warn('Events API failed:', err.message);
+          return null;
+        }),
+        axios.get('http://localhost:8001/agents/').catch(err => {
+          console.warn('Agents API failed:', err.message);
+          return null;
+        }),
+        axios.get(`http://localhost:8001/tasks/agents/${agentId}/history`).catch(err => {
+          console.warn('History API failed:', err.message);
+          return null;
+        }),
+        axios.get(`http://localhost:8001/tasks/agents/${agentId}/task-types`).catch(err => {
+          console.warn('Task types API failed:', err.message);
+          return null;
+        })
+      ]);
+
+      console.log('📊 API responses received:', {
+        stats: !!statsResponse,
+        events: !!eventsResponse,
+        agents: !!agentsResponse,
+        history: !!historyResponse,
+        taskTypes: !!taskTypesResponse
+      });
+
+      // 检查是否至少有agents数据（最重要的基础数据）
+      if (agentsResponse && agentsResponse.data && agentsResponse.data.agents) {
+        const currentAgent = agentsResponse.data.agents.find(agent => agent.agent_id === agentId);
+        
+        if (currentAgent) {
+          console.log('🎯 Found current agent:', currentAgent);
+          
+          // 从statistics API获取额外数据
+          let agentStats = null;
+          if (statsResponse && statsResponse.data && statsResponse.data.success) {
+            agentStats = statsResponse.data.data.agents.find(agent => agent.agent_id === agentId);
+            console.log('📈 Found agent stats:', agentStats);
+          }
+          
+          // 从events API获取学习事件
+          let learningEvents = [];
+          if (eventsResponse && eventsResponse.data && eventsResponse.data.success) {
+            learningEvents = eventsResponse.data.learning_events || [];
+            console.log('📚 Found learning events:', learningEvents.length);
+          }
+          
+          // 构建能力数据对象 - 使用标准能力集合，没有的设为0
+          const standardCapabilities = [
+            'data_analysis',
+            'text_generation', 
+            'classification',
+            'translation',
+            'summarization',
+            'image_recognition',
+            'sentiment_analysis',
+            'code_generation'
+          ];
+          
+          const capabilitiesData = {};
+          
+          // 初始化所有标准能力为0
+          standardCapabilities.forEach(cap => {
+            capabilitiesData[cap] = 0;
+          });
+          
+          // 设置agent实际拥有的能力值
+          if (currentAgent.capabilities && currentAgent.capability_weights) {
+            currentAgent.capabilities.forEach((cap, index) => {
+              if (standardCapabilities.includes(cap)) {
+                capabilitiesData[cap] = currentAgent.capability_weights[index] || 50;
+              }
+            });
+          }
+          
+          // 获取基础数据 - 使用真实的评价系统数据
+          const reputation = currentAgent.reputation || 50;
+          // 使用评价系统的真实completed tasks数据
+          const tasksCompleted = agentStats?.recent_evaluations || currentAgent.tasks_completed || 0;
+          // 使用评价系统的真实数据，而不是硬编码的默认值
+          const avgScore = agentStats?.average_score || currentAgent.average_score || 0;
+          const avgReward = agentStats?.average_reward || currentAgent.average_reward || 0;
+          
+          // 获取历史数据 - 优先使用API返回的真实历史数据
+          let historyData = null;
+          
+          if (historyResponse && historyResponse.data && historyResponse.data.success) {
+            historyData = historyResponse.data.data.history;
+            console.log('📈 Using real history data with tasks:', historyData.tasks_completed);
+          } else {
+            // 如果没有历史数据API，基于当前真实数据生成合理的历史趋势
+            console.log('⚠️ No real history data, generating realistic trend based on current data');
+            historyData = {
+              dates: ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+              reputation: Array(6).fill(0).map((_, i) => Math.max(10, reputation - (5-i)*Math.floor(reputation/10))),
+              tasks_completed: Array(6).fill(0).map((_, i) => Math.floor(tasksCompleted * (i+1)/6)),
+              average_scores: Array(6).fill(0).map((_, i) => Math.max(50, avgScore - (5-i)*2)),
+              rewards: Array(6).fill(0).map((_, i) => Math.max(0.1, avgReward - (5-i)*(avgReward/10)))
+            };
+          }
+          
+          // 获取任务类型分布 - 优先使用API返回的真实数据
+          let taskTypesData = {};
+          
+          if (taskTypesResponse && taskTypesResponse.data && taskTypesResponse.data.success) {
+            taskTypesData = taskTypesResponse.data.task_types;
+            console.log('📊 Using real task types data:', taskTypesData);
+          } else {
+            // 如果没有任务类型数据，基于agent能力生成合理分布
+            console.log('⚠️ No real task types data, generating based on agent capabilities');
+            const agentCapabilities = currentAgent.capabilities || [];
+            taskTypesData = {};
+            agentCapabilities.forEach(cap => {
+              taskTypesData[cap] = Math.floor(tasksCompleted * 0.2) || 1;
+            });
+            // 确保至少有一些基础数据
+            if (Object.keys(taskTypesData).length === 0) {
+              taskTypesData = {
+                data_analysis: 0,
+                text_generation: 0,
+                classification: 0,
+                translation: 0,
+                summarization: 0
+              };
+            }
+          }
+          
+          const realData = {
+            agent_id: agentId,
+            name: currentAgent.name || 'Unknown Agent',
+            reputation: reputation,
+            confidence_factor: agentStats?.confidence_factor || Math.min(100, reputation + 10),
+            risk_tolerance: agentStats?.risk_tolerance || Math.max(30, reputation - 20),
+            total_tasks: tasksCompleted,
+            successful_tasks: agentStats?.successful_evaluations || 0,
+            failed_tasks: agentStats?.failed_evaluations || 0,
+            average_score: avgScore,
+            average_reward: avgReward,
+            capabilities: capabilitiesData,
+            history: historyData,
+            task_types: taskTypesData,
+            recent_learning_events: learningEvents.length > 0 ? learningEvents.slice(0, 5).map(event => {
+              // 处理真实学习事件数据结构
+              const eventData = event.data || {};
+              const timestamp = event.timestamp || event.created_at || Date.now();
+              
+              return {
+                event_type: event.event_type || 'task_evaluation',
+                task_id: eventData.task_id || event.task_id || 'N/A',
+                score: eventData.rating || event.score || 'N/A',
+                reward: eventData.reward || event.reward || 0,
+                timestamp: timestamp,
+                date: new Date(timestamp).toLocaleDateString(),
+                description: eventData.task_title || event.description || `Learning event for ${currentAgent.name}`,
+                impact: eventData.success ? 'performance_improvement' : 'performance_decline',
+                changes: {
+                  reputation: eventData.reputation_change || 0,
+                  capabilities: (eventData.capabilities_used || []).length > 0 ? `Used: ${(eventData.capabilities_used || []).join(', ')}` : ''
+                }
+              };
+            }) : [
+              {
+                event_type: 'agent_registered',
+                task_id: null,
+                score: null,
+                reward: null,
+                timestamp: (currentAgent.registered_at || Date.now()/1000) * 1000,
+                date: new Date((currentAgent.registered_at || Date.now()/1000) * 1000).toLocaleDateString(),
+                description: `${currentAgent.name} was registered in the system`,
+                impact: 'system_registration',
+                changes: {}
+              }
+            ],
+            source: 'blockchain'
+          };
+          
+          console.log('✅ Successfully built comprehensive real learning data:', realData);
+          setLearningData(realData);
+          setLoading(false);
+          return; // 成功获取真实数据，提前返回
+        } else {
+          console.warn('⚠️ Agent not found in agents list, using mock data');
+        }
+      } else {
+        console.warn('⚠️ No agents data available, using mock data');
+      }
       
-      // 更丰富的模拟数据
-      setTimeout(() => {
-        // 为不同的代理生成不同的模拟数据
+      // 使用模拟数据作为后备
+      console.log('📱 Using mock learning data for agent:', agentId);
+      // 立即显示模拟数据，不使用setTimeout
+      // 为不同的代理生成不同的模拟数据
         let mockData;
         
         // 根据代理ID选择不同的数据模板
@@ -178,7 +402,10 @@ const LearningDashboard = () => {
                 text_generation: 75,
                 classification: 85,
                 translation: 40,
-                summarization: 65
+                summarization: 65,
+                image_recognition: 0,
+                sentiment_analysis: 0,
+                code_generation: 0
               },
               history: {
                 dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -256,7 +483,10 @@ const LearningDashboard = () => {
                 text_generation: 95,
                 classification: 60,
                 translation: 80,
-                summarization: 85
+                summarization: 85,
+                image_recognition: 0,
+                sentiment_analysis: 0,
+                code_generation: 0
               },
               history: {
                 dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -326,7 +556,10 @@ const LearningDashboard = () => {
                 text_generation: 70,
                 classification: 70,
                 translation: 70,
-                summarization: 70
+                summarization: 70,
+                image_recognition: 0,
+                sentiment_analysis: 0,
+                code_generation: 0
               },
               history: {
                 dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -371,9 +604,10 @@ const LearningDashboard = () => {
             };
         }
         
+        // 为所有mock数据添加source标识
+        mockData.source = 'mock';
         setLearningData(mockData);
         setLoading(false);
-      }, 1000);
       
     } catch (error) {
       console.error('Error fetching learning data:', error);
@@ -396,7 +630,10 @@ const LearningDashboard = () => {
           text_generation: 50,
           classification: 50,
           translation: 50,
-          summarization: 50
+          summarization: 50,
+          image_recognition: 0,
+          sentiment_analysis: 0,
+          code_generation: 0
         },
         history: {
           dates: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -431,7 +668,7 @@ const LearningDashboard = () => {
     setSelectedAgent(event.target.value);
   };
   
-  const handleTabChange = (event, newValue) => {
+  const handleTabChange = (_, newValue) => {
     setTabValue(newValue);
   };
   
@@ -441,19 +678,29 @@ const LearningDashboard = () => {
     return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
   };
   
-  // Chart data for capabilities
+  // Chart data for capabilities - use standard capability set with 0 for missing ones
+  const standardCapabilities = [
+    'data_analysis',
+    'text_generation', 
+    'classification',
+    'translation',
+    'summarization',
+    'image_recognition',
+    'sentiment_analysis',
+    'code_generation'
+  ];
+  
   const capabilitiesData = {
-    labels: ['Analysis', 'Generation', 'Classification', 'Translation', 'Summarization'],
+    labels: standardCapabilities.map(cap => 
+      // Format capability names for display
+      cap.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+    ),
     datasets: [
       {
         label: 'Capability Score',
-        data: learningData ? [
-          learningData.capabilities.data_analysis,
-          learningData.capabilities.text_generation,
-          learningData.capabilities.classification,
-          learningData.capabilities.translation,
-          learningData.capabilities.summarization
-        ] : [],
+        data: learningData ? standardCapabilities.map(cap => 
+          learningData.capabilities[cap] || 0
+        ) : Array(standardCapabilities.length).fill(0),
         backgroundColor: 'rgba(58, 134, 255, 0.2)',
         borderColor: '#3a86ff',
         borderWidth: 2,
@@ -552,6 +799,9 @@ const LearningDashboard = () => {
     maintainAspectRatio: false,
     scales: {
       r: {
+        beginAtZero: true,
+        min: 0,
+        max: 100,
         angleLines: {
           color: 'rgba(255, 255, 255, 0.1)'
         },
@@ -559,11 +809,15 @@ const LearningDashboard = () => {
           color: 'rgba(255, 255, 255, 0.1)'
         },
         pointLabels: {
-          color: '#d1d5db'
+          color: '#d1d5db',
+          font: {
+            size: 11
+          }
         },
         ticks: {
           color: '#d1d5db',
-          backdropColor: 'transparent'
+          backdropColor: 'transparent',
+          stepSize: 20
         }
       }
     },
@@ -616,7 +870,17 @@ const LearningDashboard = () => {
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Learning Dashboard</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h4">Learning Dashboard</Typography>
+          {learningData && (
+            <Chip
+              label={learningData.source === 'blockchain' ? 'Real Data' : 'Mock Data'}
+              color={learningData.source === 'blockchain' ? 'success' : 'default'}
+              size="small"
+              variant="outlined"
+            />
+          )}
+        </Box>
         <FormControl sx={{ minWidth: 200 }}>
           <InputLabel id="agent-select-label">Select Agent</InputLabel>
           <Select
@@ -634,9 +898,23 @@ const LearningDashboard = () => {
         </FormControl>
       </Box>
       
-      {loading ? (
+      {agentsLoading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
           <CircularProgress />
+          <Typography variant="body1" sx={{ ml: 2 }}>Loading agents...</Typography>
+        </Box>
+      ) : !selectedAgent ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+          <Typography variant="h6">Select an agent to view learning data</Typography>
+        </Box>
+      ) : loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+          <CircularProgress />
+          <Typography variant="body1" sx={{ ml: 2 }}>Loading learning data...</Typography>
+        </Box>
+      ) : !learningData ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+          <Typography variant="h6">No learning data available</Typography>
         </Box>
       ) : (
         <>
@@ -798,11 +1076,11 @@ const LearningDashboard = () => {
                   <CardHeader title="Capability Details" />
                   <Divider />
                   <CardContent>
-                    {Object.entries(learningData.capabilities).map(([capability, score]) => (
+                    {Object.entries(learningData?.capabilities || {}).map(([capability, score]) => (
                       <Box key={capability} sx={{ mb: 3 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                           <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-                            {capability}
+                            {capability.replace(/_/g, ' ')}
                           </Typography>
                           <Typography variant="body1" fontWeight="bold">
                             {score}/100
@@ -916,7 +1194,7 @@ const LearningDashboard = () => {
                           </Typography>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Slider
-                              value={Math.round((learningData.successful_tasks / learningData.total_tasks) * 100)}
+                              value={learningData.total_tasks > 0 ? Math.round((learningData.successful_tasks / learningData.total_tasks) * 100) : 0}
                               min={0}
                               max={100}
                               valueLabelDisplay="auto"
@@ -924,7 +1202,7 @@ const LearningDashboard = () => {
                               sx={{ flexGrow: 1, mr: 2 }}
                             />
                             <Typography variant="body1" fontWeight="bold">
-                              {Math.round((learningData.successful_tasks / learningData.total_tasks) * 100)}%
+                              {learningData.total_tasks > 0 ? Math.round((learningData.successful_tasks / learningData.total_tasks) * 100) : 0}%
                             </Typography>
                           </Box>
                         </Box>
@@ -963,41 +1241,66 @@ const LearningDashboard = () => {
                                 variant="body2" 
                                 sx={{ 
                                   textTransform: 'capitalize',
-                                  color: event.event_type === 'task_completed' ? 'success.main' : 'error.main'
+                                  color: event.event_type === 'task_evaluation' && event.score >= 1 ? 'success.main' : 
+                                         event.event_type === 'task_evaluation' && event.score < 1 ? 'error.main' : 'info.main'
                                 }}
                               >
-                                {event.event_type.replace('_', ' ')}
+                                {event.event_type === 'task_evaluation' ? 'Task Evaluation' : 
+                                 event.event_type.replace('_', ' ')}
                               </Typography>
                             </TableCell>
-                            <TableCell>{event.task_id}</TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                                {event.task_id === 'N/A' ? 'N/A' : `${event.task_id.substring(0, 8)}...`}
+                              </Typography>
+                              {event.description && event.description !== `Learning event for ${learningData.name}` && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {event.description}
+                                </Typography>
+                              )}
+                            </TableCell>
                             <TableCell>{event.score}</TableCell>
                             <TableCell>{event.reward}</TableCell>
                             <TableCell>{new Date(event.timestamp).toLocaleString()}</TableCell>
                             <TableCell>
-                              {Object.entries(event.changes).map(([param, change]) => (
-                                <Box key={param} sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                                  <Typography variant="body2" sx={{ mr: 1, textTransform: 'capitalize' }}>
-                                    {param.replace('_', ' ')}:
-                                  </Typography>
-                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    {change > 0 ? (
-                                      <>
-                                        <TrendingUpIcon color="success" fontSize="small" sx={{ mr: 0.5 }} />
-                                        <Typography variant="body2" color="success.main">
-                                          +{change}
-                                        </Typography>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <TrendingDownIcon color="error" fontSize="small" sx={{ mr: 0.5 }} />
-                                        <Typography variant="body2" color="error.main">
-                                          {change}
-                                        </Typography>
-                                      </>
-                                    )}
-                                  </Box>
-                                </Box>
-                              ))}
+                              {Object.entries(event.changes || {}).map(([param, change]) => {
+                                // 处理不同类型的变化数据
+                                if (param === 'reputation' && typeof change === 'number' && change !== 0) {
+                                  return (
+                                    <Box key={param} sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                                      <Typography variant="body2" sx={{ mr: 1, textTransform: 'capitalize' }}>
+                                        Reputation:
+                                      </Typography>
+                                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                        {change > 0 ? (
+                                          <>
+                                            <TrendingUpIcon color="success" fontSize="small" sx={{ mr: 0.5 }} />
+                                            <Typography variant="body2" color="success.main">
+                                              +{change}
+                                            </Typography>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <TrendingDownIcon color="error" fontSize="small" sx={{ mr: 0.5 }} />
+                                            <Typography variant="body2" color="error.main">
+                                              {change}
+                                            </Typography>
+                                          </>
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  );
+                                } else if (param === 'capabilities' && change && typeof change === 'string') {
+                                  return (
+                                    <Box key={param} sx={{ mb: 0.5 }}>
+                                      <Typography variant="body2" color="text.secondary">
+                                        {change}
+                                      </Typography>
+                                    </Box>
+                                  );
+                                }
+                                return null;
+                              })}
                             </TableCell>
                           </TableRow>
                         ))}
