@@ -80,6 +80,9 @@ const TaskDetails = () => {
   const [evaluationDialogOpen, setEvaluationDialogOpen] = useState(false);
   const [evaluationInProgress, setEvaluationInProgress] = useState(false);
   const [evaluationResult, setEvaluationResult] = useState(null);
+  const [evaluationStatus, setEvaluationStatus] = useState(null);
+  const [loadingEvaluationStatus, setLoadingEvaluationStatus] = useState(false);
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
   
   useEffect(() => {
     fetchTaskDetails();
@@ -218,8 +221,35 @@ const TaskDetails = () => {
       };
       
       setTask(mockTask);
+      
+      // Also fetch evaluation status if task is completed
+      if (mockTask.status === 'completed') {
+        fetchEvaluationStatus(taskId);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchEvaluationStatus = async (taskId) => {
+    setLoadingEvaluationStatus(true);
+    try {
+      const apiClient = axios.create({
+        baseURL: 'http://localhost:8001',
+      });
+      
+      const response = await apiClient.get(`/tasks/${taskId}/evaluation-status`);
+      console.log('📊 Evaluation status response:', response.data);
+      
+      if (response.data && response.data.success) {
+        setEvaluationStatus(response.data.evaluation_status);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching evaluation status:', error);
+      // Set default status if API fails
+      setEvaluationStatus({ evaluated: false });
+    } finally {
+      setLoadingEvaluationStatus(false);
     }
   };
 
@@ -451,18 +481,39 @@ const TaskDetails = () => {
         setSnackbarSeverity('success');
         setSnackbarOpen(true);
         
-        // 刷新任务详情
+        // 刷新任务详情和历史记录
         setTimeout(() => {
           fetchTaskDetails();
+          setHistoryRefreshTrigger(prev => prev + 1);
         }, 1000);
       } else {
         throw new Error(response.message || 'Failed to evaluate task');
       }
     } catch (error) {
       console.error('❌ Error evaluating task:', error);
-      setError(`Failed to evaluate task: ${error.message}`);
-      setSnackbarSeverity('error');
+      
+      // 提供更友好的错误信息
+      let userFriendlyMessage = error.message;
+      let severity = 'error';
+      
+      // If it's a duplicate evaluation error, use warning level instead of error
+      if (error.message && (error.message.includes('already been evaluated') || error.message.includes('cannot be evaluated again'))) {
+        severity = 'warning';
+        userFriendlyMessage = error.message;
+      } else if (!error.message || error.message === 'Failed to evaluate task') {
+        userFriendlyMessage = 'Failed to evaluate task. Please try again later or contact technical support.';
+      }
+      
+      setError(userFriendlyMessage);
+      setSnackbarSeverity(severity);
       setSnackbarOpen(true);
+      
+      // 如果是重复评价错误，刷新评价状态显示
+      if (severity === 'warning') {
+        setTimeout(() => {
+          fetchEvaluationStatus(taskId);
+        }, 1000);
+      }
     } finally {
       setEvaluationInProgress(false);
       setEvaluationDialogOpen(false);
@@ -628,14 +679,24 @@ const TaskDetails = () => {
               >
                 View Result
               </Button>
-              <Button 
-                variant="outlined" 
-                color="success"
-                onClick={() => setEvaluationDialogOpen(true)}
-                startIcon={<CheckCircleIcon />}
-              >
-                Evaluate Task
-              </Button>
+              {(!evaluationStatus?.evaluated && !loadingEvaluationStatus) && (
+                <Button 
+                  variant="outlined" 
+                  color="success"
+                  onClick={() => setEvaluationDialogOpen(true)}
+                  startIcon={<CheckCircleIcon />}
+                >
+                  Evaluate Task
+                </Button>
+              )}
+              {evaluationStatus?.evaluated && (
+                <Chip 
+                  label={`Already Evaluated (${evaluationStatus.evaluation_count} time${evaluationStatus.evaluation_count !== 1 ? 's' : ''})`}
+                  color="success"
+                  variant="outlined"
+                  icon={<CheckCircleIcon />}
+                />
+              )}
             </>
           )}
           <Button 
@@ -867,7 +928,7 @@ const TaskDetails = () => {
           </Paper>
           
           {/* Task History with Real Blockchain Data */}
-          <TaskHistory taskId={task.task_id} />
+          <TaskHistory taskId={task.task_id} refreshTrigger={historyRefreshTrigger} />
         </Grid>
         
         <Grid item xs={12} md={4}>

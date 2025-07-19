@@ -32,7 +32,8 @@ import {
   AccountCircle as AccountCircleIcon,
   Psychology as PsychologyIcon,
   Timeline as TimelineIcon,
-  GroupWork as GroupWorkIcon
+  GroupWork as GroupWorkIcon,
+  PlayArrow as PlayArrowIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 

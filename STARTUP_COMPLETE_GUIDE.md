@@ -214,7 +214,7 @@ cd frontend && npm start
 ### 停止服务
 ```bash
 # 停止后端
-./stop_backend_only.sh
+./stop_backend.sh
 # 或者
 pkill -f "uvicorn.*main:app"
 

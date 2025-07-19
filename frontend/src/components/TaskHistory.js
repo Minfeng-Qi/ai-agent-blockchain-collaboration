@@ -29,11 +29,13 @@ import {
   Assignment as TaskIcon,
   Group as GroupIcon,
   CheckCircle as CompleteIcon,
-  OpenInNew as ExternalLinkIcon
+  OpenInNew as ExternalLinkIcon,
+  Star as EvaluateIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
 import { taskApi } from '../services/api';
 
-const TaskHistory = ({ taskId }) => {
+const TaskHistory = ({ taskId, refreshTrigger }) => {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -42,7 +44,7 @@ const TaskHistory = ({ taskId }) => {
     if (taskId) {
       fetchTaskHistory();
     }
-  }, [taskId]);
+  }, [taskId, refreshTrigger]);
 
   const fetchTaskHistory = async () => {
     try {
@@ -51,7 +53,8 @@ const TaskHistory = ({ taskId }) => {
       const response = await taskApi.getTaskHistory(taskId);
       
       if (response.success && response.data) {
-        setHistory(response.data.history || []);
+        const historyData = response.data.data || response.data;
+        setHistory(historyData.history || []);
       } else {
         setError(response.error || 'Failed to fetch task history');
       }
@@ -64,30 +67,51 @@ const TaskHistory = ({ taskId }) => {
   };
 
   const getTimelineIcon = (eventType) => {
+    const iconProps = { 
+      sx: { 
+        fontSize: 20,
+        color: 'inherit'
+      } 
+    };
+    
     switch (eventType) {
       case 'task_created':
-        return <TaskIcon />;
+      case 'created':
+        return <TaskIcon {...iconProps} />;
       case 'collaboration_started':
-        return <GroupIcon />;
+        return <GroupIcon {...iconProps} />;
       case 'task_assigned':
-        return <TimeIcon />;
+      case 'assigned':
+        return <PersonIcon {...iconProps} />;
       case 'task_completed':
-        return <CompleteIcon />;
+      case 'completed':
+        return <CompleteIcon {...iconProps} />;
+      case 'evaluated':
+        return <EvaluateIcon {...iconProps} />;
+      case 'bid_placed':
+        return <TimeIcon {...iconProps} />;
       default:
-        return <TimeIcon />;
+        return <TimeIcon {...iconProps} />;
     }
   };
 
   const getTimelineDotColor = (eventType) => {
     switch (eventType) {
       case 'task_created':
+      case 'created':
         return 'primary';
       case 'collaboration_started':
         return 'secondary';
       case 'task_assigned':
+      case 'assigned':
         return 'info';
       case 'task_completed':
+      case 'completed':
         return 'success';
+      case 'evaluated':
+        return 'warning';
+      case 'bid_placed':
+        return 'info';
       default:
         return 'grey';
     }
@@ -98,13 +122,41 @@ const TaskHistory = ({ taskId }) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
+  const getEventTitle = (eventType) => {
+    const eventTitles = {
+      'task_created': 'Task Created',
+      'created': 'Task Created',
+      'collaboration_started': 'Collaboration Started',
+      'task_assigned': 'Task Assigned',
+      'assigned': 'Task Assigned',
+      'task_completed': 'Task Completed',
+      'completed': 'Task Completed',
+      'evaluated': 'Task Evaluated',
+      'bid_placed': 'Bid Placed'
+    };
+    
+    return eventTitles[eventType] || (eventType ? eventType.charAt(0).toUpperCase() + eventType.slice(1) : 'Unknown Event');
+  };
+
   const formatTimestamp = (timestamp) => {
-    // 由于我们目前使用区块号作为时间戳，这里显示区块号
-    return `Block #${timestamp}`;
+    try {
+      // 保持区块号格式
+      if (typeof timestamp === 'string' && timestamp.includes('Block #')) {
+        return timestamp;
+      }
+      // 如果是纯数字，转换为区块号格式
+      if (typeof timestamp === 'number') {
+        return `Block #${timestamp}`;
+      }
+      // 如果是时间戳但我们想显示为区块号，尝试从blockchain_data获取
+      return timestamp || 'Unknown time';
+    } catch (e) {
+      return timestamp || 'Unknown time';
+    }
   };
 
   const renderEventDetails = (event) => {
-    const { details } = event;
+    const details = event.details || {};
     
     return (
       <Box sx={{ mt: 2 }}>
@@ -141,51 +193,36 @@ const TaskHistory = ({ taskId }) => {
                 Event Details
               </Typography>
               
-              {event.type === 'task_created' && (
+              <Typography variant="body2" color="text.secondary">
+                Actor: {formatAddress(event.actor)}
+              </Typography>
+              
+              {event.event === 'evaluated' && event.evaluation_data && (
                 <>
-                  <Typography variant="body2" color="text.secondary">
-                    Creator: {formatAddress(details.creator)}
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    <strong>Evaluation Details:</strong>
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Task ID: {formatAddress(details.task_id)}
+                    Evaluator: {event.evaluation_data.evaluator}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rating: {event.evaluation_data.rating}/5
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Agent: {formatAddress(event.evaluation_data.agent_id)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Reward: {event.evaluation_data.reward} ETH
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Reputation Change: {event.evaluation_data.reputation_change > 0 ? '+' : ''}{event.evaluation_data.reputation_change}
                   </Typography>
                 </>
               )}
               
-              {event.type === 'collaboration_started' && (
-                <>
-                  <Typography variant="body2" color="text.secondary">
-                    Collaboration ID: {details.collaboration_id}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Agent Count: {details.agent_count}
-                  </Typography>
-                  <Box sx={{ mt: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Selected Agents:
-                    </Typography>
-                    {details.selected_agents?.map((agent, index) => (
-                      <Chip
-                        key={index}
-                        label={formatAddress(agent)}
-                        size="small"
-                        sx={{ ml: 0.5, mb: 0.5 }}
-                        variant="outlined"
-                      />
-                    ))}
-                  </Box>
-                </>
-              )}
-              
-              {event.type === 'task_assigned' && (
-                <Typography variant="body2" color="text.secondary">
-                  Assigned to: {formatAddress(details.agent)}
-                </Typography>
-              )}
-              
-              {event.type === 'task_completed' && (
-                <Typography variant="body2" color="text.secondary">
-                  Result: {details.result}
+              {event.event !== 'evaluated' && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Details: {typeof event.details === 'string' ? event.details : 'Standard event'}
                 </Typography>
               )}
             </Paper>
@@ -234,34 +271,67 @@ const TaskHistory = ({ taskId }) => {
         
         <Divider sx={{ my: 2 }} />
         
-        <Timeline>
+        <Timeline sx={{ 
+          padding: 0,
+          margin: 0,
+          '& .MuiTimelineItem-root': {
+            '&:before': {
+              content: 'none', // 移除Timeline默认的左侧间距
+            },
+            minHeight: 80,
+            alignItems: 'flex-start',
+          },
+          '& .MuiTimelineSeparator-root': {
+            flex: '0 0 auto',
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
+          '& .MuiTimelineConnector-root': {
+            width: 3,
+            backgroundColor: 'grey.300',
+          },
+          '& .MuiTimelineContent-root': {
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
+        }}>
           {history.map((event, index) => (
-            <TimelineItem key={index}>
+            <TimelineItem key={index} sx={{ alignItems: 'flex-start' }}>
               <TimelineSeparator>
-                <TimelineDot color={getTimelineDotColor(event.type)}>
-                  {getTimelineIcon(event.type)}
+                <TimelineDot 
+                  color={getTimelineDotColor(event.event)}
+                  sx={{ 
+                    width: 48, 
+                    height: 48,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '8px 0',
+                    position: 'relative',
+                    boxShadow: 2,
+                  }}
+                >
+                  {getTimelineIcon(event.event)}
                 </TimelineDot>
                 {index < history.length - 1 && <TimelineConnector />}
               </TimelineSeparator>
               
-              <TimelineContent>
+              <TimelineContent sx={{ py: '20px', px: 2, mt: 0 }}>
                 <Box sx={{ mb: 2 }}>
                   <Box display="flex" alignItems="center" gap={1} mb={1}>
-                    <Typography variant="h6" component="span">
-                      {event.icon}
-                    </Typography>
-                    <Typography variant="subtitle1" component="span">
-                      {event.title}
+                    <Typography variant="subtitle1" component="span" sx={{ fontWeight: 600 }}>
+                      {getEventTitle(event.event)}
                     </Typography>
                     <Chip 
                       label={formatTimestamp(event.timestamp)} 
                       size="small" 
                       variant="outlined"
+                      color={event.event === 'evaluated' ? 'warning' : 'primary'}
                     />
                   </Box>
                   
                   <Typography variant="body2" color="text.secondary" gutterBottom>
-                    {event.description}
+                    {event.details || 'No details available'}
                   </Typography>
                   
                   <Accordion>

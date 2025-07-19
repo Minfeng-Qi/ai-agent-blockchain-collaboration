@@ -95,7 +95,11 @@
       "Bash(conda install:*)",
       "Bash(pgrep:*)",
       "Bash(env)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(jq:*)",
+      "Bash(awk:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(/dev/null)"
     ],
     "deny": []
   }

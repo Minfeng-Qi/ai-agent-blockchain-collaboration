@@ -1020,6 +1020,16 @@ export const api = {
     }
   },
   
+  previewTaskDeletion: async (taskId) => {
+    try {
+      const response = await apiClient.get(`/tasks/${taskId}/delete-preview`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error previewing deletion for task ${taskId}:`, error);
+      throw error;
+    }
+  },
+
   deleteTask: async (taskId) => {
     try {
       const response = await apiClient.delete(`/tasks/${taskId}`);
@@ -1081,7 +1091,35 @@ export const api = {
       return response.data;
     } catch (error) {
       console.error(`Error evaluating task ${taskId}:`, error);
-      throw error;
+      
+      // 提取后端返回的具体错误信息
+      let errorMessage = 'Failed to evaluate task';
+      
+      if (error.response && error.response.data) {
+        if (error.response.data.detail) {
+          // Handle specific errors with friendly English messages
+          const detail = error.response.data.detail;
+          if (detail.includes('already been evaluated') || detail.includes('Duplicate evaluations are not allowed')) {
+            errorMessage = 'This task has already been evaluated and cannot be evaluated again. Please contact administrator if you need to modify the evaluation.';
+          } else if (detail.includes('not found')) {
+            errorMessage = 'Task not found. Please check if the task ID is correct.';
+          } else if (detail.includes('must be completed before evaluation')) {
+            errorMessage = 'Only completed tasks can be evaluated. Please wait for task completion.';
+          } else {
+            // Keep original error message for other cases
+            errorMessage = detail;
+          }
+        } else if (error.response.data.message) {
+          errorMessage = error.response.data.message;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      // 创建带有友好错误信息的新错误对象
+      const friendlyError = new Error(errorMessage);
+      friendlyError.originalError = error;
+      throw friendlyError;
     }
   },
 
@@ -1420,6 +1458,7 @@ export const taskApi = {
   getTaskHistory: api.getTaskHistory,
   createTask: api.createTask,
   updateTask: api.updateTask,
+  previewTaskDeletion: api.previewTaskDeletion,
   deleteTask: api.deleteTask,
   assignTask: api.assignTask,
   smartAssignTask: api.smartAssignTask,
