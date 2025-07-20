@@ -698,7 +698,7 @@ const LearningDashboard = () => {
     datasets: [
       {
         label: 'Capability Score',
-        data: learningData ? standardCapabilities.map(cap => 
+        data: learningData && learningData.capabilities ? standardCapabilities.map(cap => 
           learningData.capabilities[cap] || 0
         ) : Array(standardCapabilities.length).fill(0),
         backgroundColor: 'rgba(58, 134, 255, 0.2)',
@@ -968,7 +968,7 @@ const LearningDashboard = () => {
                       <TrendingUpIcon color="success" />
                     </Box>
                     <Typography variant="body2" color="text.secondary">
-                      Success Rate: {Math.round((learningData.successful_tasks / learningData.total_tasks) * 100)}%
+                      Success Rate: {learningData.total_tasks > 0 ? Math.round((learningData.successful_tasks / learningData.total_tasks) * 100) : 0}%
                     </Typography>
                   </CardContent>
                 </Card>
@@ -1018,7 +1018,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Reputation History" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Line data={reputationData} options={lineOptions} />
+                    {reputationData && reputationData.labels && reputationData.datasets ? (
+                      <Line data={reputationData} options={lineOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1029,7 +1035,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Capabilities" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Radar data={capabilitiesData} options={radarOptions} />
+                    {capabilitiesData && capabilitiesData.labels && capabilitiesData.datasets ? (
+                      <Radar data={capabilitiesData} options={radarOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1040,7 +1052,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Task Types Distribution" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Bar data={taskTypesData} options={barOptions} />
+                    {taskTypesData && taskTypesData.labels && taskTypesData.datasets ? (
+                      <Bar data={taskTypesData} options={barOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1051,7 +1069,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Task Performance" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Bar data={taskPerformanceData} options={barOptions} />
+                    {taskPerformanceData && taskPerformanceData.labels && taskPerformanceData.datasets ? (
+                      <Bar data={taskPerformanceData} options={barOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1066,7 +1090,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Capability Scores" />
                   <Divider />
                   <CardContent sx={{ height: 400 }}>
-                    <Radar data={capabilitiesData} options={radarOptions} />
+                    {capabilitiesData && capabilitiesData.labels && capabilitiesData.datasets ? (
+                      <Radar data={capabilitiesData} options={radarOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1109,7 +1139,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Task Type Distribution" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Bar data={taskTypesData} options={barOptions} />
+                    {taskTypesData && taskTypesData.labels && taskTypesData.datasets ? (
+                      <Bar data={taskTypesData} options={barOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1124,7 +1160,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Reputation Growth" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Line data={reputationData} options={lineOptions} />
+                    {reputationData && reputationData.labels && reputationData.datasets ? (
+                      <Line data={reputationData} options={lineOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1134,7 +1176,13 @@ const LearningDashboard = () => {
                   <CardHeader title="Tasks Completed" />
                   <Divider />
                   <CardContent sx={{ height: 300 }}>
-                    <Bar data={taskPerformanceData} options={barOptions} />
+                    {taskPerformanceData && taskPerformanceData.labels && taskPerformanceData.datasets ? (
+                      <Bar data={taskPerformanceData} options={barOptions} />
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                        <CircularProgress />
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -1251,7 +1299,7 @@ const LearningDashboard = () => {
                             </TableCell>
                             <TableCell>
                               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                                {event.task_id === 'N/A' ? 'N/A' : `${event.task_id.substring(0, 8)}...`}
+                                {!event.task_id || event.task_id === 'N/A' ? 'N/A' : `${event.task_id.substring(0, 8)}...`}
                               </Typography>
                               {event.description && event.description !== `Learning event for ${learningData.name}` && (
                                 <Typography variant="caption" color="text.secondary">

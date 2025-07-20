@@ -97,10 +97,10 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Contract initialization failed: {e}")
     
-    # 暂时禁用后台任务执行器进行调试
-    # logger.info("Starting background task executor...")
-    # await start_background_executor()
-    # logger.info("✅ Background task executor started")
+    # 启用后台任务执行器
+    logger.info("Starting background task executor...")
+    await start_background_executor()
+    logger.info("✅ Background task executor started")
 
 @app.get("/")
 async def root():

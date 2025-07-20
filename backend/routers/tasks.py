@@ -2036,14 +2036,30 @@ async def get_task_history(task_id: str):
     
     # 添加真实的评价事件
     try:
-        # 获取所有评价事件，然后过滤出当前任务的事件
+        # 直接获取当前任务的评价事件（更高效的查询）
         evaluation_events = collaboration_db_service.get_blockchain_events(
             event_type="task_evaluation", 
-            limit=100  # 获取更多事件以确保包含相关的
+            task_id=task_id,  # 直接使用task_id过滤
+            limit=100
         )
         
+        # 对同一任务的评估事件进行去重，只显示一个评估事件
+        task_evaluation_found = False
+        best_evaluation_event = None
+        all_related_evaluations = []
+        
         for eval_event in evaluation_events:
-            event_data = eval_event.get('data') or eval_event.get('event_data') or {}
+            # 由于已经通过task_id过滤，所有事件都是相关的
+            all_related_evaluations.append(eval_event)
+            # 选择最新的评估事件作为代表
+            if not task_evaluation_found or (eval_event.get('timestamp') and 
+                (not best_evaluation_event or eval_event.get('timestamp') > best_evaluation_event.get('timestamp'))):
+                best_evaluation_event = eval_event
+                task_evaluation_found = True
+        
+        # 如果找到评估事件，只添加一个汇总的评估记录到历史中
+        if best_evaluation_event and all_related_evaluations:
+            event_data = best_evaluation_event.get('data') or best_evaluation_event.get('event_data') or {}
             if isinstance(event_data, str):
                 import json
                 try:
@@ -2051,49 +2067,50 @@ async def get_task_history(task_id: str):
                 except:
                     event_data = {}
             
-            # 只添加与当前任务相关的评价事件
-            if event_data.get('task_id') == task_id:
-                evaluator = event_data.get('evaluator', 'user')
-                rating = event_data.get('rating', 'N/A')
-                agent_id = eval_event.get('agent_id', 'unknown')
-                timestamp = eval_event.get('timestamp')
-                
-                if timestamp:
-                    timestamp_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
-                else:
-                    timestamp_str = eval_event.get('created_at', 'unknown')
-                
-                # 获取区块信息，如果没有则使用最新的区块号
-                block_number = eval_event.get('block_number')
-                transaction_hash = eval_event.get('transaction_hash', 'unknown')
-                
-                # 如果没有区块号，尝试获取当前最新区块号
-                if not block_number or block_number == 'None':
-                    try:
-                        if contract_service.w3 and contract_service.w3.is_connected():
-                            latest_block = contract_service.w3.eth.get_block('latest')
-                            block_number = latest_block.number
-                    except Exception as e:
-                        # 如果获取失败，使用一个默认的高区块号确保评价事件排在后面
-                        block_number = 999999
-                
-                real_history.append({
-                    "event": "evaluated", 
-                    "timestamp": f"Block #{block_number}",
-                    "actor": agent_id,
-                    "details": f"Task evaluated by {evaluator} with rating {rating}/5 for agent {agent_id[:10]}...",
-                    "evaluation_data": {
-                        "evaluator": evaluator,
-                        "rating": rating,
-                        "agent_id": agent_id,
-                        "reward": event_data.get('reward', 0),
-                        "reputation_change": event_data.get('reputation_change', 0)
-                    },
-                    "blockchain_data": {
-                        "block_number": block_number,
-                        "transaction_hash": transaction_hash
-                    }
-                })
+            evaluator = event_data.get('evaluator', 'user')
+            rating = event_data.get('rating', 'N/A')
+            agent_id = best_evaluation_event.get('agent_id', 'unknown')
+            timestamp = best_evaluation_event.get('timestamp')
+            
+            # 获取区块信息
+            block_number = best_evaluation_event.get('block_number')
+            transaction_hash = best_evaluation_event.get('transaction_hash', 'unknown')
+            
+            # 如果没有区块号，尝试获取当前最新区块号
+            if not block_number or block_number == 'None':
+                try:
+                    if contract_service.w3 and contract_service.w3.is_connected():
+                        latest_block = contract_service.w3.eth.get_block('latest')
+                        block_number = latest_block.number
+                except Exception as e:
+                    block_number = 999999
+            
+            # 统计所有评估的总奖励和受影响的agent数量
+            total_agents = len(all_related_evaluations)
+            total_reward = sum(
+                json.loads(e.get('data', '{}') if isinstance(e.get('data'), str) else '{}').get('reward', 0) 
+                if e.get('data') else 0 
+                for e in all_related_evaluations
+            )
+            
+            real_history.append({
+                "event": "evaluated", 
+                "timestamp": f"Block #{block_number}",
+                "actor": agent_id,
+                "details": f"Task evaluated by {evaluator} with rating {rating}/5 (affected {total_agents} agent{'s' if total_agents > 1 else ''})",
+                "evaluation_data": {
+                    "evaluator": evaluator,
+                    "rating": rating,
+                    "agent_id": agent_id,
+                    "total_agents": total_agents,
+                    "total_reward": total_reward,
+                    "reputation_change": event_data.get('reputation_change', 0)
+                },
+                "blockchain_data": {
+                    "block_number": block_number,
+                    "transaction_hash": transaction_hash
+                }
+            })
         
         logger.info(f"Added {len(evaluation_events)} evaluation events to task {task_id} history")
         

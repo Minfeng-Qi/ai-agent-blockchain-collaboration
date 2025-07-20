@@ -167,9 +167,21 @@ const AgentDetails = () => {
     setLoading(true);
     setError(null);
     try {
-      // 从API获取代理详情
-      const response = await agentApi.getAgentById(agentId);
-      console.log('Agent API response:', response);
+      // 并行获取agent详情和learning events
+      const [agentResponse, learningEventsResponse] = await Promise.all([
+        agentApi.getAgentById(agentId),
+        fetch(`http://localhost:8001/tasks/agents/${agentId}/learning-events`)
+          .then(res => res.json())
+          .catch(err => {
+            console.warn('Learning events API failed:', err);
+            return { success: false, learning_events: [] };
+          })
+      ]);
+      
+      console.log('Agent API response:', agentResponse);
+      console.log('Learning Events API response:', learningEventsResponse);
+      
+      const response = agentResponse;
       
       if (response && (response.agent_id || response.name)) {
         console.log('Raw API response:', response);
@@ -191,7 +203,17 @@ const AgentDetails = () => {
               
             // 使用真实的任务数据，不再生成mock数据
             recent_tasks: response.recent_tasks || [],
-            learning_events: response.learning_events || generateMockLearningEvents(response.agent_id),
+            learning_events: learningEventsResponse.success ? 
+              learningEventsResponse.learning_events.map(event => ({
+                event_id: event.event_id,
+                description: event.data?.task_title ? `Task evaluation: ${event.data.task_title}` : 'Learning event',
+                timestamp: event.timestamp,
+                impact: event.data?.success !== false ? 'positive' : 'negative',
+                affected_capability: event.data?.capabilities_used ? event.data.capabilities_used[0] : 'general',
+                score_change: event.data?.rating || 1,
+                data: event.data
+              })) : 
+              generateMockLearningEvents(response.agent_id),
             task_types: response.task_types || generateMockTaskTypes(response.capabilities),
             
             // 使用增强历史数据或生成默认数据
@@ -225,7 +247,17 @@ const AgentDetails = () => {
             capabilities: response.capabilities || [],
             capability_weights: response.capability_weights || [],
             task_history: response.task_history || [],
-            learning_events: response.learning_events || [],
+            learning_events: learningEventsResponse.success ? 
+              learningEventsResponse.learning_events.map(event => ({
+                event_id: event.event_id,
+                description: event.data?.task_title ? `Task evaluation: ${event.data.task_title}` : 'Learning event',
+                timestamp: event.timestamp,
+                impact: event.data?.success !== false ? 'positive' : 'negative',
+                affected_capability: event.data?.capabilities_used ? event.data.capabilities_used[0] : 'general',
+                score_change: event.data?.rating || 1,
+                data: event.data
+              })) : 
+              [],
             active: response.active !== false,
             metadataURI: response.metadataURI,
             agentType: response.agentType,
@@ -1195,41 +1227,78 @@ const AgentDetails = () => {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Event</TableCell>
-                      <TableCell>Affected Capability</TableCell>
-                      <TableCell>Impact</TableCell>
-                      <TableCell>Score Change</TableCell>
-                      <TableCell>Date</TableCell>
+                      <TableCell>Event Details</TableCell>
+                      <TableCell>Capabilities Used</TableCell>
+                      <TableCell>Evaluation Result</TableCell>
+                      <TableCell>Rating & Reward</TableCell>
+                      <TableCell>Date & Impact</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {agent.learning_events && agent.learning_events.map((event) => (
                       <TableRow key={event.event_id}>
-                        <TableCell>{event.description || event.data}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {event.description || 'Learning Event'}
+                          </Typography>
+                          {event.data?.task_id && (
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                              Task: {event.data.task_id.substring(0, 8)}...
+                            </Typography>
+                          )}
+                          {event.data?.notes && (
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
+                              {event.data.notes}
+                            </Typography>
+                          )}
+                        </TableCell>
                         <TableCell sx={{ textTransform: 'capitalize' }}>
-                          {event.affected_capability || 'General'}
+                          {event.affected_capability ? 
+                            event.affected_capability.replace(/_/g, ' ') : 
+                            (event.data?.capabilities_used ? 
+                              event.data.capabilities_used.slice(0, 2).map(cap => cap.replace(/_/g, ' ')).join(', ') : 
+                              'General'
+                            )
+                          }
                         </TableCell>
                         <TableCell>
                           <Chip 
-                            label={event.impact ? event.impact.charAt(0).toUpperCase() + event.impact.slice(1) : 'Positive'} 
+                            label={event.impact === 'positive' || !event.impact ? 'Positive' : 'Negative'} 
                             size="small"
                             color={event.impact === 'positive' || !event.impact ? 'success' : 'error'}
                           />
+                          {event.data?.evaluator && (
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
+                              By: {event.data.evaluator}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell sx={{ 
-                          color: (event.score_change || event.impact_score || 0) > 0 ? 'success.main' : 'error.main',
+                          color: (event.score_change || 0) >= 3 ? 'success.main' : (event.score_change || 0) >= 1 ? 'warning.main' : 'error.main',
                           fontWeight: 'bold'
                         }}>
                           {event.score_change ? 
-                            (event.score_change > 0 ? `+${event.score_change}` : event.score_change) :
-                            event.impact_score ? `+${event.impact_score.toFixed(1)}` : '+1'
+                            `Rating: ${event.score_change}/5` :
+                            'N/A'
                           }
+                          {event.data?.reward && (
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
+                              Reward: {event.data.reward} ETH
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell>
-                          {event.timestamp ? 
-                            new Date(typeof event.timestamp === 'string' ? event.timestamp : event.timestamp * 1000).toLocaleString() :
-                            'Recent'
-                          }
+                          <Typography variant="body2">
+                            {event.timestamp ? 
+                              new Date(event.timestamp).toLocaleString() :
+                              'Recent'
+                            }
+                          </Typography>
+                          {event.data?.reputation_change && (
+                            <Typography variant="caption" color={event.data.reputation_change > 0 ? 'success.main' : 'error.main'} sx={{ display: 'block' }}>
+                              Rep: {event.data.reputation_change > 0 ? '+' : ''}{event.data.reputation_change}
+                            </Typography>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

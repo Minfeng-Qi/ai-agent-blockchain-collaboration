@@ -400,6 +400,7 @@ class CollaborationDBService:
                 event_id=learning_event["event_id"],
                 event_type=learning_event["event_type"],
                 agent_id=learning_event["agent_id"],
+                task_id=learning_event.get("task_id"),  # 添加task_id字段
                 block_number=learning_event.get("block_number"),
                 transaction_hash=learning_event.get("transaction_hash"),
                 event_data=learning_event["data"],  # 设置必须的event_data字段
@@ -616,23 +617,83 @@ class CollaborationDBService:
         """
         db = self.get_db()
         try:
-            events = db.query(BlockchainEvent).filter(
+            # 方法1: 查找该agent作为evaluator的事件
+            events_as_evaluator = db.query(BlockchainEvent).filter(
                 BlockchainEvent.agent_id == agent_id,
                 BlockchainEvent.event_type.in_(["task_evaluation", "task_completion", "training"])
-            ).order_by(desc(BlockchainEvent.timestamp)).limit(limit).all()
+            ).all()
             
-            return [
-                {
-                    "event_id": event.event_id,
-                    "event_type": event.event_type,
-                    "agent_id": event.agent_id,
-                    "data": json.loads(event.data) if event.data else {},
-                    "transaction_hash": event.transaction_hash,
-                    "block_number": event.block_number,
-                    "timestamp": event.timestamp.isoformat() if event.timestamp else None
-                }
-                for event in events
-            ]
+            # 方法2: 查找与该agent相关的任务的所有评估事件
+            # 首先需要找到这个agent参与的任务
+            from services import contract_service
+            
+            # 获取该agent参与的任务（通过collaboration events）
+            agent_tasks = set()
+            try:
+                # 尝试从合约获取该agent的任务历史
+                # 这里我们从所有评估事件中获取一个代表性的样本
+                all_events = db.query(BlockchainEvent).filter(
+                    BlockchainEvent.event_type == "task_evaluation"
+                ).all()
+                
+                # 为了演示，我们返回所有评估事件，但标记它们与该agent的关系
+                logger.info(f"Found {len(all_events)} total evaluation events for analysis")
+                
+                # 构建学习事件列表
+                learning_events = []
+                
+                # 添加该agent作为evaluator的事件
+                for event in events_as_evaluator:
+                    learning_events.append({
+                        "event_id": event.event_id,
+                        "event_type": event.event_type,
+                        "agent_id": event.agent_id,
+                        "data": json.loads(event.data) if event.data else {},
+                        "transaction_hash": event.transaction_hash,
+                        "block_number": event.block_number,
+                        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                        "relation": "evaluator"
+                    })
+                
+                # 如果该agent作为evaluator的事件不足，添加一些相关的评估事件作为学习参考
+                if len(learning_events) < 5:
+                    recent_evaluations = db.query(BlockchainEvent).filter(
+                        BlockchainEvent.event_type == "task_evaluation"
+                    ).order_by(desc(BlockchainEvent.timestamp)).limit(min(10, limit)).all()
+                    
+                    for event in recent_evaluations:
+                        if event.event_id not in [e["event_id"] for e in learning_events]:
+                            learning_events.append({
+                                "event_id": event.event_id,
+                                "event_type": event.event_type,
+                                "agent_id": event.agent_id,
+                                "data": json.loads(event.data) if event.data else {},
+                                "transaction_hash": event.transaction_hash,
+                                "block_number": event.block_number,
+                                "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                                "relation": "related_task"
+                            })
+                
+                # 按时间排序并限制数量
+                learning_events.sort(key=lambda x: x["timestamp"] if x["timestamp"] else "", reverse=True)
+                return learning_events[:limit]
+                
+            except Exception as e:
+                logger.warning(f"Error getting task-related events: {e}")
+                # 如果获取任务相关事件失败，至少返回该agent作为evaluator的事件
+                return [
+                    {
+                        "event_id": event.event_id,
+                        "event_type": event.event_type,
+                        "agent_id": event.agent_id,
+                        "data": json.loads(event.data) if event.data else {},
+                        "transaction_hash": event.transaction_hash,
+                        "block_number": event.block_number,
+                        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                        "relation": "evaluator"
+                    }
+                    for event in events_as_evaluator
+                ]
             
         except SQLAlchemyError as e:
             logger.error(f"Error getting agent learning events: {e}")

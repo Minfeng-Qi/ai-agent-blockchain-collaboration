@@ -99,7 +99,9 @@
       "Bash(jq:*)",
       "Bash(awk:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(/dev/null)"
+      "Bash(/dev/null)",
+      "Bash(timeout 10 curl -v http://localhost:8001/tasks)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

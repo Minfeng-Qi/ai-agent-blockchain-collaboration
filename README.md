@@ -1,112 +1,226 @@
-# LLM区块链智能体学习系统
+# LLM Blockchain Agent Learning System
 
-基于区块链的AI智能体任务管理和学习系统，支持智能体注册、任务分配、协作学习和激励机制。
+A blockchain-based AI agent task management and learning system that supports agent registration, task allocation, collaborative learning, and incentive mechanisms.
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 系统要求
-- **Node.js**: 18.x或更高版本
-- **Python**: 3.8或更高版本
-- **IPFS**: Kubo 0.35.0或更高版本
-- **Git**: 2.x或更高版本
+### System Requirements
+- **Node.js**: 18.x or higher
+- **Python**: 3.8 or higher  
+- **IPFS**: Kubo 0.35.0 or higher
+- **Git**: 2.x or higher
 
-详细安装指南请参考: [系统要求](SYSTEM_REQUIREMENTS.md)
+For detailed installation guide, see: [System Requirements](SYSTEM_REQUIREMENTS.md)
 
-### 一键启动
+### One-Click Launch
 ```bash
 ./quick_start.sh
 ```
 
-### 手动启动
-详见 [启动指南](STARTUP_GUIDE.md)
+### Manual Setup
+See [Startup Guide](STARTUP_GUIDE.md) for detailed instructions
 
-## 📋 系统组件
+## 📋 System Components
 
-- **前端** (React): http://localhost:3000
-- **后端** (FastAPI): http://localhost:8001 
-- **区块链** (Ganache): http://localhost:8545
-- **IPFS节点**: http://localhost:5001
-- **IPFS网关**: http://localhost:8080
-- **智能合约**: 7个部署的合约
+- **Frontend** (React): http://localhost:3000
+- **Backend** (FastAPI): http://localhost:8001
+- **Blockchain** (Ganache): http://localhost:8545
+- **IPFS Node**: http://localhost:5001
+- **IPFS Gateway**: http://localhost:8080
+- **Smart Contracts**: 7 deployed contracts
 
-## 🏗️ 项目结构
+## 🏗️ Project Structure
 
 ```
 llm-blockchain/
-├── frontend/          # React前端应用
-├── backend/           # FastAPI后端服务
-├── contracts-clean/   # 智能合约源码
-├── artifacts-clean/   # 编译后的合约ABI
-├── scripts/           # 自动化脚本
-├── quick_start.sh     # 快速启动脚本
-└── STARTUP_GUIDE.md   # 详细启动指南
+├── frontend/          # React frontend application
+├── backend/           # FastAPI backend services
+├── contracts-clean/   # Smart contract source code
+├── artifacts-clean/   # Compiled contract ABIs
+├── scripts/           # Automation scripts
+├── quick_start.sh     # Quick start script
+└── STARTUP_GUIDE.md   # Detailed startup guide
 ```
 
-## 🔧 核心功能
+## 🔧 Core Features
 
-### 智能合约
-- **AgentRegistry**: 智能体注册管理
-- **TaskManager**: 任务创建和分配
-- **Learning**: 学习事件记录
-- **IncentiveEngine**: 激励机制
-- **BidAuction**: 竞价拍卖
-- **MessageHub**: 消息通信
-- **ActionLogger**: 行为日志
+### Smart Contracts
+- **AgentRegistry**: Agent registration and management
+- **TaskManager**: Task creation and assignment
+- **Learning**: Learning event recording
+- **IncentiveEngine**: Reward and incentive mechanisms
+- **BidAuction**: Bidding and auction system
+- **MessageHub**: Inter-agent communication
+- **ActionLogger**: Behavior and action logging
 
-### 前端界面
-- 📊 实时数据仪表板
-- 🔍 区块链浏览器
-- 👥 智能体管理
-- 📝 任务管理
-- 📈 学习可视化
+### Frontend Interface
+- 📊 Real-time data dashboard
+- 🔍 Blockchain explorer
+- 👥 Agent management
+- 📝 Task management
+- 📈 Learning visualization
+- 💬 Multi-agent collaboration viewer
 
-### 后端API
-- RESTful API接口
-- 区块链数据集成
-- 智能合约交互
-- 实时数据获取
-- IPFS分布式存储
+### Backend API
+- RESTful API endpoints
+- Blockchain data integration
+- Smart contract interactions
+- Real-time data retrieval
+- IPFS distributed storage
 
-### 存储系统
-- **IPFS**: 协作结果的分布式存储
-- **区块链**: 任务状态和交易记录
-- **本地数据库**: 协作历史和缓存
+### Storage Systems
+- **IPFS**: Distributed storage for collaboration results
+- **Blockchain**: Task states and transaction records
+- **Local Database**: Collaboration history and caching
 
-## 🛠️ 开发
+## 🤖 Multi-Agent Collaboration
 
-### 启动开发环境
+### Key Features
+- **Multi-Agent Task Assignment**: Tasks can be assigned to multiple agents for collaborative work
+- **Independent LLM API Calls**: Each agent makes independent calls to language models (OpenAI/DeepSeek)
+- **Phase-Based Collaboration**: 
+  - Phase 1: Initial contributions from all agents
+  - Phase 2: Collaborative refinement and integration
+- **Real-time Conversation Tracking**: Complete conversation history between agents
+- **Agent Performance Analytics**: Detailed metrics on agent participation and success rates
+
+### Collaboration Workflow
+1. **Task Creation**: Multi-agent tasks are created with specific capability requirements
+2. **Agent Selection**: System selects best-suited agents based on capabilities and reputation
+3. **Collaborative Execution**: 
+   - All assigned agents participate with independent LLM calls
+   - Conversation state tracks each agent's contributions
+   - Agents build upon each other's work in refinement phases
+4. **Result Integration**: Final results include all agent contributions and conversation history
+5. **Learning Events**: All participating agents receive learning events and reputation updates
+
+### Technical Implementation
+- **Fixed Multi-Agent Priority Logic**: Ensures multi-agent tasks are correctly identified and processed
+- **Collaboration State Preservation**: Prevents loss of agent participation data during execution
+- **IPFS Storage**: Complete conversation history stored in distributed system
+- **Frontend Visualization**: Rich UI for viewing multi-agent conversations and results
+
+## 🛠️ Development
+
+### Start Development Environment
 ```bash
-# 启动区块链和后端
+# Start blockchain and backend
 echo "3" | ./quick_start.sh
 
-# 启动前端开发服务器
+# Start frontend development server
 cd frontend && npm start
 ```
 
-### API文档
-访问 http://localhost:8001/docs 查看完整API文档
+### API Documentation
+Visit http://localhost:8001/docs for complete API documentation
 
-## 📦 部署
+### Testing Multi-Agent Features
+```bash
+# Run multi-agent collaboration tests
+cd backend
+python tests/test_multi_agent_collaboration.py
 
-### 合约部署
+# Test complete workflow
+python tests/test_complete_workflow.py
+
+# Verify agent learning events
+python check_agent_learning.py
+```
+
+## 📊 Monitoring & Analytics
+
+### Real-time Monitoring
+- **Blockchain Status**: Ganache console
+- **Backend Logs**: `tail -f backend.log`
+- **IPFS Logs**: `tail -f ipfs.log`
+- **Frontend**: Browser developer tools
+- **IPFS Status**: http://localhost:5001/webui
+
+### Learning Dashboard
+- Agent performance metrics
+- Task completion statistics
+- Learning event timeline
+- Reputation history tracking
+- Collaboration success rates
+
+### Conversation Analytics
+- Multi-agent conversation flows
+- Agent contribution analysis
+- Task result visualization
+- IPFS storage statistics
+
+## 📦 Deployment
+
+### Contract Deployment
 ```bash
 ./scripts/auto_deploy.py
 ```
 
-### 服务管理
+### Service Management
 ```bash
-./scripts/start_system.sh  # 启动所有服务
-./scripts/stop_system.sh   # 停止所有服务
+./scripts/start_system.sh  # Start all services
+./scripts/stop_system.sh   # Stop all services
 ```
 
-## 🔍 监控
+### Production Configuration
+- Configure environment variables in `.env` files
+- Set up proper IPFS node clustering
+- Configure blockchain network parameters
+- Set up monitoring and logging
 
-- **区块链状态**: Ganache控制台
-- **后端日志**: `tail -f backend.log`  
-- **IPFS日志**: `tail -f ipfs.log`
-- **前端**: 浏览器开发者工具
-- **IPFS状态**: http://localhost:5001/webui
+## 🔧 Recent Updates
 
-## 📄 许可证
+### Multi-Agent Collaboration Fixes (Latest)
+- **Fixed Agent Priority Logic**: Multi-agent tasks now correctly prioritize `assigned_agents` over `assigned_agent`
+- **Enhanced Collaboration State**: Prevents loss of agent participation data during task execution
+- **Improved IPFS Storage**: All participating agents properly stored in conversation records
+- **Better Frontend Display**: Complete multi-agent conversation history in result viewer
+
+### Learning System Improvements
+- **Task History Deduplication**: Fixed duplicate evaluation events in task history
+- **Learning Event Attribution**: Proper task_id association for all learning events
+- **Agent Statistics**: Accurate tracking of agent participation and performance
+- **Real-time Updates**: Improved synchronization between blockchain and local database
+
+### UI/UX Enhancements
+- **Null Safety**: Fixed JavaScript runtime errors in dashboard components
+- **Data Visualization**: Enhanced charts and graphs for learning analytics
+- **Agent Details**: Comprehensive learning event display in agent profiles
+- **Task Results**: Rich conversation viewer for multi-agent collaborations
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -am 'Add your feature'`
+4. Push to the branch: `git push origin feature/your-feature`
+5. Submit a pull request
+
+### Development Guidelines
+- Follow existing code style and conventions
+- Add tests for new features
+- Update documentation for API changes
+- Test multi-agent scenarios thoroughly
+
+## 📄 License
 
 MIT License
+
+## 🔗 Links
+
+- [System Requirements](SYSTEM_REQUIREMENTS.md)
+- [Startup Guide](STARTUP_GUIDE.md)
+- [API Documentation](http://localhost:8001/docs)
+- [IPFS Web UI](http://localhost:5001/webui)
+
+## 📞 Support
+
+For issues and questions:
+1. Check existing issues in the repository
+2. Create a new issue with detailed description
+3. Include system information and error logs
+4. Test with provided examples before reporting
+
+---
+
+**Note**: This system demonstrates advanced blockchain-based AI agent collaboration with real LLM integration. All multi-agent features have been thoroughly tested and validated.
