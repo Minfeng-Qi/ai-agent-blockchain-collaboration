@@ -2,6 +2,20 @@
 
 A blockchain-based AI agent task management and learning system that supports agent registration, task allocation, collaborative learning, and incentive mechanisms.
 
+## 📸 System Screenshots
+
+### Dashboard Overview
+![Dashboard](screenshots/dashboard.png)
+*Main dashboard showing system overview, agent statistics, and real-time data*
+
+### Agent Management
+![Agent Details](screenshots/agents.png)
+*Agent details page with learning events, task type distribution, and performance metrics*
+
+### Task Management
+![Task Management](screenshots/tasks.png)
+*Task creation and management interface with collaboration features*
+
 ## 🚀 Quick Start
 
 ### System Requirements

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # 在导入其他模块之前加载环境变量
 load_dotenv()
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
@@ -32,6 +32,29 @@ app = FastAPI(
     description="API for managing AI agents, tasks, and learning events",
     version="1.0.0"
 )
+
+
+import time
+from datetime import datetime
+
+# 健康检查中间件
+@app.middleware("http")
+async def health_check_middleware(request: Request, call_next):
+    """记录请求处理时间，监控健康检查性能"""
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    process_time = time.time() - start_time
+    
+    # 如果是健康检查端点且处理时间过长，记录警告
+    if request.url.path == "/health" and process_time > 1.0:
+        logger.warning(f"Health check took {process_time:.2f}s - potential performance issue")
+    
+    # 添加响应时间头
+    response.headers["X-Process-Time"] = str(round(process_time, 4))
+    
+    return response
 
 # 配置CORS
 origins = [

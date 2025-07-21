@@ -166,20 +166,36 @@ const AgentDetails = () => {
   const fetchAgentDetails = async () => {
     setLoading(true);
     setError(null);
+    
+    // 在try外部声明变量，以便在catch块中访问
+    let learningEventsResponse = { success: false, learning_events: [] };
+    let taskTypesResponse = { success: false, task_types: {} };
+    
     try {
-      // 并行获取agent详情和learning events
-      const [agentResponse, learningEventsResponse] = await Promise.all([
+      // 并行获取agent详情、learning events和task types
+      const [agentResponse, learningEventsRes, taskTypesRes] = await Promise.all([
         agentApi.getAgentById(agentId),
         fetch(`http://localhost:8001/tasks/agents/${agentId}/learning-events`)
           .then(res => res.json())
           .catch(err => {
             console.warn('Learning events API failed:', err);
             return { success: false, learning_events: [] };
+          }),
+        fetch(`http://localhost:8001/tasks/agents/${agentId}/task-types`)
+          .then(res => res.json())
+          .catch(err => {
+            console.warn('Task types API failed:', err);
+            return { success: false, task_types: {} };
           })
       ]);
       
+      // 将API响应赋值给外部变量
+      learningEventsResponse = learningEventsRes;
+      taskTypesResponse = taskTypesRes;
+      
       console.log('Agent API response:', agentResponse);
       console.log('Learning Events API response:', learningEventsResponse);
+      console.log('Task Types API response:', taskTypesResponse);
       
       const response = agentResponse;
       
@@ -213,8 +229,13 @@ const AgentDetails = () => {
                 score_change: event.data?.rating || 1,
                 data: event.data
               })) : 
-              generateMockLearningEvents(response.agent_id),
-            task_types: response.task_types || generateMockTaskTypes(response.capabilities),
+              [],
+            task_types: taskTypesResponse.success ? 
+              (() => {
+                console.log('✅ Using real task types data for enhanced agent:', taskTypesResponse.task_types);
+                return taskTypesResponse.task_types;
+              })() : 
+              (response.task_types || {}),
             
             // 使用增强历史数据或生成默认数据
             history: response.history || {
@@ -265,7 +286,12 @@ const AgentDetails = () => {
             
             // 使用真实的任务数据，不再生成mock数据
             recent_tasks: response.recent_tasks || [],
-            task_types: generateMockTaskTypes(response.capabilities),
+            task_types: taskTypesResponse.success ? 
+              (() => {
+                console.log('✅ Using real task types data for standard agent:', taskTypesResponse.task_types);
+                return taskTypesResponse.task_types;
+              })() : 
+              {},
             
             // 为图表生成一些模拟历史数据
             history: {
@@ -314,13 +340,7 @@ const AgentDetails = () => {
           average_scores: [70, 75, 78, 80, 82, 85],
           rewards: [180, 200, 220, 230, 240, 245]
         },
-        task_types: {
-          analysis: 18,
-          generation: 12,
-          classification: 8,
-          translation: 2,
-          summarization: 2
-        },
+        task_types: (taskTypesResponse && taskTypesResponse.success) ? taskTypesResponse.task_types : {},
         recent_tasks: [
           {
             task_id: '1',
@@ -347,32 +367,16 @@ const AgentDetails = () => {
             completed_at: Math.floor(Date.now() / 1000) - 259200 // 3 days ago
           }
         ],
-        learning_events: [
-          {
-            event_id: '1',
-            description: 'Improved classification accuracy by 5%',
-            timestamp: Math.floor(Date.now() / 1000) - 172800, // 2 days ago
-            impact: 'positive',
-            affected_capability: 'classification',
-            score_change: 5
-          },
-          {
-            event_id: '2',
-            description: 'Expanded vocabulary for text generation',
-            timestamp: Math.floor(Date.now() / 1000) - 345600, // 4 days ago
-            impact: 'positive',
-            affected_capability: 'generation',
-            score_change: 3
-          },
-          {
-            event_id: '3',
-            description: 'Failed to properly analyze complex data patterns',
-            timestamp: Math.floor(Date.now() / 1000) - 518400, // 6 days ago
-            impact: 'negative',
-            affected_capability: 'analysis',
-            score_change: -2
-          }
-        ]
+        learning_events: (learningEventsResponse && learningEventsResponse.success) ? 
+          learningEventsResponse.learning_events.map(event => ({
+            event_id: event.event_id,
+            description: event.data?.task_title ? `Task evaluation: ${event.data.task_title}` : 'Learning event',
+            timestamp: event.timestamp,
+            impact: event.data?.success !== false ? 'positive' : 'negative',
+            affected_capability: event.data?.capabilities_used ? event.data.capabilities_used[0] : 'general',
+            score_change: event.data?.rating || 1,
+            data: event.data
+          })) : []
       };
       
       setAgent(mockAgent);
